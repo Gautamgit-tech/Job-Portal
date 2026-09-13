@@ -1,4 +1,5 @@
-export const server = "http://localhost:4444";
+const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+export const server = `http://${host}:4444`;
 
 const apiList = {
   login: `${server}/auth/login`,

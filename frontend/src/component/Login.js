@@ -18,15 +18,30 @@ import apiList from "../lib/apiList";
 import isAuth from "../lib/isAuth";
 
 const useStyles = makeStyles((theme) => ({
-  body: {
-    padding: "60px 60px",
-  },
+  page: { width: "100%", minHeight: "calc(100vh - 64px)", padding: theme.spacing(4), display: "flex", alignItems: "center", justifyContent: "center", background: "#f4f7f9", boxSizing: "border-box" },
+  shell: { width: "100%", maxWidth: 1080, minHeight: 610, display: "grid", gridTemplateColumns: "minmax(0, 0.9fr) minmax(0, 1.1fr)", overflow: "hidden", borderRadius: 24, background: "#fff", boxShadow: "0 24px 70px rgba(16, 42, 67, .18)", [theme.breakpoints.down("sm")]: { gridTemplateColumns: "1fr", minHeight: 0 } },
+  formSide: { padding: theme.spacing(6, 7), display: "flex", flexDirection: "column", justifyContent: "center", [theme.breakpoints.down("sm")]: { padding: theme.spacing(4, 3) } },
+  art: { position: "relative", overflow: "hidden", padding: theme.spacing(6), color: "#fff", background: "linear-gradient(145deg, #46166b 0%, #c21783 48%, #f22b65 100%)", display: "flex", flexDirection: "column", justifyContent: "space-between", [theme.breakpoints.down("sm")]: { minHeight: 220, padding: theme.spacing(4) } },
+  eyebrow: { color: "#c21783", fontWeight: 700, letterSpacing: ".12em" },
+  title: { marginTop: theme.spacing(1), fontWeight: 800, color: "#102a43" },
+  subtitle: { marginTop: theme.spacing(1), color: "#52606d", lineHeight: 1.6 },
   inputBox: {
-    width: "300px",
+    width: "100%",
   },
   submitButton: {
-    width: "300px",
+    width: "100%",
+    minHeight: 48,
+    borderRadius: 10,
+    background: "#c21783",
+    "&:hover": { background: "#a3126f" },
   },
+  artTitle: { maxWidth: 390, fontWeight: 800, lineHeight: 1.05 },
+  artCopy: { maxWidth: 360, marginTop: theme.spacing(2), lineHeight: 1.6, color: "rgba(255,255,255,.82)" },
+  orb: { position: "absolute", borderRadius: "50%", border: "1px solid rgba(255,255,255,.34)", background: "rgba(255,255,255,.12)" },
+  orbOne: { width: 230, height: 230, right: -50, top: 70 },
+  orbTwo: { width: 120, height: 120, right: 180, bottom: 90 },
+  artFooter: { position: "relative", zIndex: 1, fontSize: 13, color: "rgba(255,255,255,.75)" },
+  switch: { textAlign: "center", marginTop: theme.spacing(2), color: "#52606d" },
 }));
 
 const Login = (props) => {
@@ -106,13 +121,13 @@ const Login = (props) => {
   return loggedin ? (
     <Redirect to="/" />
   ) : (
-    <Paper elevation={3} className={classes.body}>
-      <Grid container direction="column" spacing={4} alignItems="center">
-        <Grid item>
-          <Typography variant="h3" component="h2">
-            Login
-          </Typography>
-        </Grid>
+    <main className={classes.page}>
+      <Paper elevation={0} className={classes.shell}>
+        <section className={classes.formSide}>
+          <Typography variant="overline" className={classes.eyebrow}>JOB PORTAL / MEMBER ACCESS</Typography>
+          <Typography variant="h3" component="h1" className={classes.title}>Welcome back.</Typography>
+          <Typography variant="body1" className={classes.subtitle}>Sign in to track applications, discover better roles, and keep your career moving.</Typography>
+          <Grid container direction="column" spacing={3} style={{ marginTop: 18 }}>
         <Grid item>
           <EmailInput
             label="Email"
@@ -141,8 +156,20 @@ const Login = (props) => {
             Login
           </Button>
         </Grid>
-      </Grid>
-    </Paper>
+          </Grid>
+          <Typography variant="body2" className={classes.switch}>New to Job Portal? <Button color="primary" href="/signup">Create an account</Button></Typography>
+        </section>
+        <aside className={classes.art}>
+          <div className={classes.orb + " " + classes.orbOne} />
+          <div className={classes.orb + " " + classes.orbTwo} />
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <Typography variant="h2" className={classes.artTitle}>Your next chapter starts here.</Typography>
+            <Typography variant="body1" className={classes.artCopy}>One place for ambitious students, thoughtful teams, and work that makes a difference.</Typography>
+          </div>
+          <Typography className={classes.artFooter}>Discover. Apply. Grow.</Typography>
+        </aside>
+      </Paper>
+    </main>
   );
 };
 

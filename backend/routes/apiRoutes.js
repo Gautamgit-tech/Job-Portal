@@ -49,7 +49,7 @@ router.post("/jobs", jwtAuth, (req, res) => {
 });
 
 // to get all the jobs [pagination] [for recruiter personal and for everyone]
-router.get("/jobs", jwtAuth, (req, res) => {
+router.get("/jobs", jwtAuth.optional, (req, res) => {
   let user = req.user;
 
   let findParams = {};
@@ -60,7 +60,7 @@ router.get("/jobs", jwtAuth, (req, res) => {
   // const skip = page - 1 >= 0 ? (page - 1) * limit : 0;
 
   // to list down jobs posted by a particular recruiter
-  if (user.type === "recruiter" && req.query.myjobs) {
+  if (user && user.type === "recruiter" && req.query.myjobs) {
     findParams = {
       ...findParams,
       userId: user._id,

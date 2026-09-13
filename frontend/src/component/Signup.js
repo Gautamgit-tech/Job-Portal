@@ -26,15 +26,30 @@ import apiList from "../lib/apiList";
 import isAuth from "../lib/isAuth";
 
 const useStyles = makeStyles((theme) => ({
-  body: {
-    padding: "60px 60px",
-  },
+  page: { width: "100%", minHeight: "calc(100vh - 64px)", padding: theme.spacing(3, 4, 4), display: "flex", alignItems: "flex-start", justifyContent: "center", background: "#f4f7f9", boxSizing: "border-box", overflowY: "auto" },
+  shell: { width: "100%", maxWidth: 1180, minHeight: "calc(100vh - 112px)", display: "grid", gridTemplateColumns: "minmax(0, .95fr) minmax(0, 1.05fr)", overflow: "hidden", borderRadius: 24, background: "#fff", boxShadow: "0 24px 70px rgba(16, 42, 67, .18)", alignItems: "stretch", [theme.breakpoints.down("sm")]: { gridTemplateColumns: "1fr", minHeight: 0 } },
+  formSide: { gridColumn: 2, gridRow: 1, padding: theme.spacing(4, 6), minHeight: 0, maxHeight: "calc(100vh - 112px)", overflowY: "auto", overscrollBehavior: "contain", scrollbarWidth: "thin", [theme.breakpoints.down("sm")]: { gridColumn: 1, gridRow: 2, padding: theme.spacing(3, 2), maxHeight: "none", overflowY: "visible" } },
+  art: { gridColumn: 1, gridRow: 1, position: "relative", overflow: "hidden", padding: theme.spacing(6), color: "#fff", background: "linear-gradient(145deg, #46166b 0%, #c21783 48%, #f22b65 100%)", display: "flex", flexDirection: "column", justifyContent: "space-between", [theme.breakpoints.down("sm")]: { minHeight: 210, padding: theme.spacing(4), gridColumn: 1, gridRow: 1 } },
+  eyebrow: { color: "#c21783", fontWeight: 700, letterSpacing: ".12em" },
+  title: { marginTop: theme.spacing(1), fontWeight: 800, color: "#102a43" },
+  subtitle: { marginTop: theme.spacing(1), color: "#52606d", lineHeight: 1.6 },
   inputBox: {
-    width: "400px",
+    width: "100%",
   },
   submitButton: {
-    width: "400px",
+    width: "100%",
+    minHeight: 48,
+    borderRadius: 10,
+    background: "#c21783",
+    "&:hover": { background: "#a3126f" },
   },
+  artTitle: { maxWidth: 390, fontWeight: 800, lineHeight: 1.05 },
+  artCopy: { maxWidth: 350, marginTop: theme.spacing(2), lineHeight: 1.6, color: "rgba(255,255,255,.82)" },
+  orb: { position: "absolute", borderRadius: "50%", border: "1px solid rgba(255,255,255,.34)", background: "rgba(255,255,255,.12)" },
+  orbOne: { width: 230, height: 230, right: -50, top: 70 },
+  orbTwo: { width: 120, height: 120, right: 180, bottom: 90 },
+  artFooter: { position: "relative", zIndex: 1, fontSize: 13, color: "rgba(255,255,255,.75)" },
+  switch: { textAlign: "center", marginTop: theme.spacing(1), color: "#52606d" },
 }));
 
 const MultifieldInput = (props) => {
@@ -114,7 +129,7 @@ const MultifieldInput = (props) => {
   );
 };
 
-const Login = (props) => {
+const Signup = (props) => {
   const classes = useStyles();
   const setPopup = useContext(SetPopupContext);
 
@@ -323,13 +338,13 @@ const Login = (props) => {
   return loggedin ? (
     <Redirect to="/" />
   ) : (
-    <Paper elevation={3} className={classes.body}>
-      <Grid container direction="column" spacing={4} alignItems="center">
-        <Grid item>
-          <Typography variant="h3" component="h2">
-            Signup
-          </Typography>
-        </Grid>
+    <main className={classes.page}>
+      <Paper elevation={0} className={classes.shell}>
+        <section className={classes.formSide}>
+          <Typography variant="overline" className={classes.eyebrow}>JOB PORTAL / JOIN THE NETWORK</Typography>
+          <Typography variant="h3" component="h1" className={classes.title}>Create your space.</Typography>
+          <Typography variant="body1" className={classes.subtitle}>Build a profile that helps the right opportunities find you.</Typography>
+          <Grid container direction="column" spacing={3} style={{ marginTop: 16 }}>
         <Grid item>
           <TextField
             select
@@ -488,12 +503,24 @@ const Login = (props) => {
             Signup
           </Button>
         </Grid>
-      </Grid>
-    </Paper>
+          </Grid>
+          <Typography variant="body2" className={classes.switch}>Already have an account? <Button color="primary" href="/login">Sign in</Button></Typography>
+        </section>
+        <aside className={classes.art}>
+          <div className={classes.orb + " " + classes.orbOne} />
+          <div className={classes.orb + " " + classes.orbTwo} />
+          <div style={{ position: "relative", zIndex: 1 }}>
+            <Typography variant="h2" className={classes.artTitle}>Make your work visible.</Typography>
+            <Typography variant="body1" className={classes.artCopy}>Students find their first big opportunity here. Recruiters find the people who will shape what comes next.</Typography>
+          </div>
+          <Typography className={classes.artFooter}>A better beginning, one profile at a time.</Typography>
+        </aside>
+      </Paper>
+    </main>
   );
 };
 
-export default Login;
+export default Signup;
 
 // {/* <Grid item>
 //           <PasswordInput

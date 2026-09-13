@@ -1,4 +1,4 @@
-import { createContext, useState } from "react";
+import React, { createContext, useState } from "react";
 import { BrowserRouter, Switch, Route } from "react-router-dom";
 import { Grid, makeStyles } from "@material-ui/core";
 
@@ -16,18 +16,19 @@ import JobApplications from "./component/recruiter/JobApplications";
 import AcceptedApplicants from "./component/recruiter/AcceptedApplicants";
 import RecruiterProfile from "./component/recruiter/Profile";
 import MessagePopup from "./lib/MessagePopup";
-import isAuth, { userType } from "./lib/isAuth";
+import { userType } from "./lib/isAuth";
 
 const useStyles = makeStyles((theme) => ({
   body: {
     display: "flex",
     flexDirection: "column",
-    justifyContent: "center",
+    justifyContent: "flex-start",
     alignItems: "center",
-    minHeight: "98vh",
+    minHeight: "calc(100vh - 64px)",
     paddingTop: "64px",
     boxSizing: "border-box",
     width: "100%",
+    background: "#f4f7f9",
   },
 }));
 

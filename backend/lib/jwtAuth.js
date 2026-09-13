@@ -14,4 +14,13 @@ const jwtAuth = (req, res, next) => {
   })(req, res, next);
 };
 
+jwtAuth.optional = (req, res, next) => {
+  passport.authenticate("jwt", { session: false }, function (err, user) {
+    if (!err && user) {
+      req.user = user;
+    }
+    next();
+  })(req, res, next);
+};
+
 module.exports = jwtAuth;

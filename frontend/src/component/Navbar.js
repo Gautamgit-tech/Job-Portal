@@ -1,94 +1,45 @@
-import React from "react";
-import {
-  AppBar,
-  Toolbar,
-  Typography,
-  Button,
-  makeStyles,
-} from "@material-ui/core";
+import React, { useState } from "react";
+import { AppBar, Button, Drawer, Hidden, IconButton, List, ListItem, ListItemText, makeStyles, Toolbar, Typography } from "@material-ui/core";
+import MenuIcon from "@material-ui/icons/Menu";
 import { useHistory } from "react-router-dom";
 
 import isAuth, { userType } from "../lib/isAuth";
 
 const useStyles = makeStyles((theme) => ({
-  root: {
-    flexGrow: 1,
-  },
-  menuButton: {
-    marginRight: theme.spacing(2),
-  },
-  title: {
-    flexGrow: 1,
-  },
+  title: { flexGrow: 1, fontWeight: 700, letterSpacing: "0.02em" },
+  navButton: { marginLeft: theme.spacing(0.5) },
+  drawer: { width: 250 },
 }));
 
-const Navbar = (props) => {
-  const classes = useStyles();
-  let history = useHistory();
+const linksForUser = () => {
+  if (!isAuth()) return [["Login", "/login"], ["Signup", "/signup"]];
+  if (userType() === "recruiter") return [["Home", "/home"], ["Add jobs", "/addjob"], ["My jobs", "/myjobs"], ["Employees", "/employees"], ["Profile", "/profile"], ["Logout", "/logout"]];
+  return [["Home", "/home"], ["Dashboard", "/profile"], ["Applications", "/applications"], ["Logout", "/logout"]];
+};
 
-  const handleClick = (location) => {
-    console.log(location);
-    history.push(location);
-  };
+const Navbar = () => {
+  const classes = useStyles();
+  const history = useHistory();
+  const [open, setOpen] = useState(false);
+  const links = linksForUser();
+  const navigate = (location) => { setOpen(false); history.push(location); };
 
   return (
     <AppBar position="fixed">
       <Toolbar>
-        <Typography variant="h6" className={classes.title}>
-          Job Portal
-        </Typography>
-        {isAuth() ? (
-          userType() === "recruiter" ? (
-            <>
-              <Button color="inherit" onClick={() => handleClick("/home")}>
-                Home
-              </Button>
-              <Button color="inherit" onClick={() => handleClick("/addjob")}>
-                Add Jobs
-              </Button>
-              <Button color="inherit" onClick={() => handleClick("/myjobs")}>
-                My Jobs
-              </Button>
-              <Button color="inherit" onClick={() => handleClick("/employees")}>
-                Employees
-              </Button>
-              <Button color="inherit" onClick={() => handleClick("/profile")}>
-                Profile
-              </Button>
-              <Button color="inherit" onClick={() => handleClick("/logout")}>
-                Logout
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button color="inherit" onClick={() => handleClick("/home")}>
-                Home
-              </Button>
-              <Button
-                color="inherit"
-                onClick={() => handleClick("/applications")}
-              >
-                Applications
-              </Button>
-              <Button color="inherit" onClick={() => handleClick("/profile")}>
-                Profile
-              </Button>
-              <Button color="inherit" onClick={() => handleClick("/logout")}>
-                Logout
-              </Button>
-            </>
-          )
-        ) : (
-          <>
-            <Button color="inherit" onClick={() => handleClick("/login")}>
-              Login
-            </Button>
-            <Button color="inherit" onClick={() => handleClick("/signup")}>
-              Signup
-            </Button>
-          </>
-        )}
+        <Typography variant="h6" className={classes.title}>Job Portal</Typography>
+        <Hidden xsDown>
+          {links.map(([label, location]) => <Button className={classes.navButton} color="inherit" key={location} onClick={() => navigate(location)}>{label}</Button>)}
+        </Hidden>
+        <Hidden smUp>
+          <IconButton color="inherit" aria-label="Open navigation" onClick={() => setOpen(true)}><MenuIcon /></IconButton>
+        </Hidden>
       </Toolbar>
+      <Drawer anchor="right" open={open} onClose={() => setOpen(false)}>
+        <List className={classes.drawer}>
+          {links.map(([label, location]) => <ListItem button key={location} onClick={() => navigate(location)}><ListItemText primary={label} /></ListItem>)}
+        </List>
+      </Drawer>
     </AppBar>
   );
 };
