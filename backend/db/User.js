@@ -10,51 +10,57 @@ let schema = new mongoose.Schema(
       lowercase: true,
       required: true,
     },
+    phone: {
+      type: String,
+      unique: true,
+      required: true,
+      validate: {
+        validator: function (v) {
+          return /^\+\d{1,3}\d{10}$/.test(v);
+        },
+        msg: "Phone number is invalid!",
+      },
+    },
     password: {
       type: String,
-      required: true,
+      required: false,
     },
     type: {
       type: String,
       enum: ["recruiter", "applicant"],
       required: true,
     },
+    otp: {
+      type: String,
+      select: false,
+    },
+    otpExpiry: {
+      type: Date,
+      select: false,
+    },
   },
   { collation: { locale: "en" } }
 );
 
-// Password hashing
 schema.pre("save", function (next) {
   let user = this;
-
-  // if the data is not modified
-  if (!user.isModified("password")) {
+  if (!user.isModified("password") || !user.password) {
     return next();
   }
-
   bcrypt.hash(user.password, 10, (err, hash) => {
-    if (err) {
-      return next(err);
-    }
+    if (err) return next(err);
     user.password = hash;
     next();
   });
 });
 
-// Password verification upon login
 schema.methods.login = function (password) {
   let user = this;
-
   return new Promise((resolve, reject) => {
     bcrypt.compare(password, user.password, (err, result) => {
-      if (err) {
-        reject(err);
-      }
-      if (result) {
-        resolve();
-      } else {
-        reject();
-      }
+      if (err) reject(err);
+      if (result) resolve();
+      else reject();
     });
   });
 };

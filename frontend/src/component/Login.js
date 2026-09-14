@@ -10,12 +10,10 @@ import {
 import axios from "axios";
 import { Redirect } from "react-router-dom";
 
-import PasswordInput from "../lib/PasswordInput";
-import EmailInput from "../lib/EmailInput";
 import { SetPopupContext } from "../App";
-
 import apiList from "../lib/apiList";
 import isAuth from "../lib/isAuth";
+import PasswordInput from "../lib/PasswordInput";
 
 const useStyles = makeStyles((theme) => ({
   page: { width: "100%", minHeight: "calc(100vh - 64px)", padding: theme.spacing(4), display: "flex", alignItems: "center", justifyContent: "center", background: "#f4f7f9", boxSizing: "border-box" },
@@ -25,16 +23,8 @@ const useStyles = makeStyles((theme) => ({
   eyebrow: { color: "#c21783", fontWeight: 700, letterSpacing: ".12em" },
   title: { marginTop: theme.spacing(1), fontWeight: 800, color: "#102a43" },
   subtitle: { marginTop: theme.spacing(1), color: "#52606d", lineHeight: 1.6 },
-  inputBox: {
-    width: "100%",
-  },
-  submitButton: {
-    width: "100%",
-    minHeight: 48,
-    borderRadius: 10,
-    background: "#c21783",
-    "&:hover": { background: "#a3126f" },
-  },
+  inputBox: { width: "100%" },
+  submitButton: { width: "100%", minHeight: 48, borderRadius: 10, background: "#c21783", "&:hover": { background: "#a3126f" } },
   artTitle: { maxWidth: 390, fontWeight: 800, lineHeight: 1.05 },
   artCopy: { maxWidth: 360, marginTop: theme.spacing(2), lineHeight: 1.6, color: "rgba(255,255,255,.82)" },
   orb: { position: "absolute", borderRadius: "50%", border: "1px solid rgba(255,255,255,.34)", background: "rgba(255,255,255,.12)" },
@@ -49,73 +39,28 @@ const Login = (props) => {
   const setPopup = useContext(SetPopupContext);
 
   const [loggedin, setLoggedin] = useState(isAuth());
-
-  const [loginDetails, setLoginDetails] = useState({
-    email: "",
-    password: "",
-  });
-
-  const [inputErrorHandler, setInputErrorHandler] = useState({
-    email: {
-      error: false,
-      message: "",
-    },
-    password: {
-      error: false,
-      message: "",
-    },
-  });
-
-  const handleInput = (key, value) => {
-    setLoginDetails({
-      ...loginDetails,
-      [key]: value,
-    });
-  };
-
-  const handleInputError = (key, status, message) => {
-    setInputErrorHandler({
-      ...inputErrorHandler,
-      [key]: {
-        error: status,
-        message: message,
-      },
-    });
-  };
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleLogin = () => {
-    const verified = !Object.keys(inputErrorHandler).some((obj) => {
-      return inputErrorHandler[obj].error;
-    });
-    if (verified) {
-      axios
-        .post(apiList.login, loginDetails)
-        .then((response) => {
-          localStorage.setItem("token", response.data.token);
-          localStorage.setItem("type", response.data.type);
-          setLoggedin(isAuth());
-          setPopup({
-            open: true,
-            severity: "success",
-            message: "Logged in successfully",
-          });
-          console.log(response);
-        })
-        .catch((err) => {
-          setPopup({
-            open: true,
-            severity: "error",
-            message: err.response.data.message,
-          });
-          console.log(err.response);
-        });
-    } else {
-      setPopup({
-        open: true,
-        severity: "error",
-        message: "Incorrect Input",
-      });
+    if (!email || !password) {
+      setPopup({ open: true, severity: "error", message: "Email and password are required" });
+      return;
     }
+    setLoading(true);
+    axios
+      .post(apiList.login, { email, password })
+      .then((response) => {
+        localStorage.setItem("token", response.data.token);
+        localStorage.setItem("type", response.data.type);
+        setLoggedin(isAuth());
+        setPopup({ open: true, severity: "success", message: "Logged in successfully" });
+      })
+      .catch((err) => {
+        setPopup({ open: true, severity: "error", message: err.response?.data?.message || "Something went wrong" });
+      })
+      .finally(() => setLoading(false));
   };
 
   return loggedin ? (
@@ -126,38 +71,39 @@ const Login = (props) => {
         <section className={classes.formSide}>
           <Typography variant="overline" className={classes.eyebrow}>JOB PORTAL / MEMBER ACCESS</Typography>
           <Typography variant="h3" component="h1" className={classes.title}>Welcome back.</Typography>
-          <Typography variant="body1" className={classes.subtitle}>Sign in to track applications, discover better roles, and keep your career moving.</Typography>
+          <Typography variant="body1" className={classes.subtitle}>
+            Sign in with your registered email and password.
+          </Typography>
+
           <Grid container direction="column" spacing={3} style={{ marginTop: 18 }}>
-        <Grid item>
-          <EmailInput
-            label="Email"
-            value={loginDetails.email}
-            onChange={(event) => handleInput("email", event.target.value)}
-            inputErrorHandler={inputErrorHandler}
-            handleInputError={handleInputError}
-            className={classes.inputBox}
-          />
-        </Grid>
-        <Grid item>
-          <PasswordInput
-            label="Password"
-            value={loginDetails.password}
-            onChange={(event) => handleInput("password", event.target.value)}
-            className={classes.inputBox}
-          />
-        </Grid>
-        <Grid item>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={() => handleLogin()}
-            className={classes.submitButton}
-          >
-            Login
-          </Button>
-        </Grid>
+            <Grid item>
+              <TextField
+                label="Email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className={classes.inputBox}
+                variant="outlined"
+              />
+            </Grid>
+            <Grid item>
+              <PasswordInput
+                label="Password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className={classes.inputBox}
+              />
+            </Grid>
+            <Grid item>
+              <Button variant="contained" color="primary" disabled={loading} onClick={handleLogin} className={classes.submitButton}>
+                {loading ? "Signing in..." : "Sign in"}
+              </Button>
+            </Grid>
           </Grid>
-          <Typography variant="body2" className={classes.switch}>New to Job Portal? <Button color="primary" href="/signup">Create an account</Button></Typography>
+
+          <Typography variant="body2" className={classes.switch}>
+            New to Job Portal? <Button color="primary" href="/signup">Create an account</Button>
+          </Typography>
         </section>
         <aside className={classes.art}>
           <div className={classes.orb + " " + classes.orbOne} />
