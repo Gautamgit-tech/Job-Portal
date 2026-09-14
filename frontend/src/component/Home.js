@@ -1,11 +1,13 @@
-import React, { useContext, useEffect, useMemo, useState } from "react";
-import { Button, Chip, Grid, InputAdornment, makeStyles, MenuItem, Modal, Paper, TextField, Typography } from "@material-ui/core";
+import React, { useContext, useEffect, useState } from "react";
+import { Button, Chip, Grid, IconButton, InputAdornment, makeStyles, MenuItem, Modal, Paper, TextField, Typography } from "@material-ui/core";
 import Rating from "@material-ui/lab/Rating";
 import axios from "axios";
 import SearchIcon from "@material-ui/icons/Search";
 import TuneIcon from "@material-ui/icons/Tune";
 import LocationOnIcon from "@material-ui/icons/LocationOn";
 import ScheduleIcon from "@material-ui/icons/Schedule";
+import BookmarkBorderIcon from "@material-ui/icons/BookmarkBorder";
+import BookmarkIcon from "@material-ui/icons/Bookmark";
 
 import { SetPopupContext } from "../App";
 import apiList from "../lib/apiList";
@@ -35,7 +37,24 @@ const JobTile = ({ job }) => {
   const setPopup = useContext(SetPopupContext);
   const [open, setOpen] = useState(false);
   const [sop, setSop] = useState("");
+  const [saved, setSaved] = useState(false);
   const canApply = userType() === "applicant";
+
+  useEffect(() => {
+    if (!canApply) return;
+    axios.get(apiList.savedJobStatus(job._id), { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }).then((response) => {
+      setSaved(response.data.saved);
+    }).catch(() => {});
+  }, [canApply, job._id]);
+
+  const toggleSaved = () => {
+    const headers = { Authorization: `Bearer ${localStorage.getItem("token")}` };
+    const request = saved ? axios.delete(`${apiList.jobs}/${job._id}/save`, { headers }) : axios.post(`${apiList.jobs}/${job._id}/save`, {}, { headers });
+    request.then((response) => {
+      setSaved(response.data.saved);
+      setPopup({ open: true, severity: "success", message: response.data.message });
+    }).catch((error) => setPopup({ open: true, severity: "error", message: error.response?.data?.message || "Unable to update saved jobs" }));
+  };
 
   const handleApply = () => {
     axios.post(`${apiList.jobs}/${job._id}/applications`, { sop }, { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }).then((response) => {
@@ -46,10 +65,10 @@ const JobTile = ({ job }) => {
   };
 
   return (
-    <Paper className={classes.card} elevation={0}>
-      <div className={classes.cardHeader}>
+    <Paper id={`job-${job._id}`} className={classes.card} elevation={0}>
+        <div className={classes.cardHeader}>
         <div><Typography variant="h6" component="h2">{job.title}</Typography><Typography variant="body2" color="textSecondary">{job.recruiter?.name || "Verified employer"}</Typography></div>
-        <Chip label={job.jobType} size="small" color="primary" />
+        <div><IconButton aria-label={saved ? "Unsave job" : "Save job"} onClick={toggleSaved} disabled={!canApply}>{saved ? <BookmarkIcon color="primary" /> : <BookmarkBorderIcon />}</IconButton><Chip label={job.jobType} size="small" color="primary" /></div>
       </div>
       <div className={classes.details}>
         <Rating value={job.rating > -1 ? job.rating : 0} precision={0.5} readOnly size="small" />
@@ -78,18 +97,32 @@ const Home = () => {
   const [query, setQuery] = useState("");
   const [type, setType] = useState("all");
   const [sort, setSort] = useState("newest");
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(1);
 
   useEffect(() => {
-    axios.get(apiList.jobs, { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }).then((response) => setJobs(response.data.filter((job) => new Date(job.deadline) > new Date()))).catch((error) => setPopup({ open: true, severity: "error", message: error.response?.data?.message || "Unable to load jobs" }));
-  }, [setPopup]);
-
-  const visibleJobs = useMemo(() => {
-    const filtered = jobs.filter((job) => {
-      const text = `${job.title} ${(job.skillsets || []).join(" ")} ${job.recruiter?.name || ""}`.toLowerCase();
-      return text.includes(query.toLowerCase()) && (type === "all" || job.jobType === type);
-    });
-    return [...filtered].sort((left, right) => sort === "salary" ? right.salary - left.salary : new Date(right.dateOfPosting) - new Date(left.dateOfPosting));
-  }, [jobs, query, sort, type]);
+    const timer = setTimeout(() => {
+      const params = {
+        page,
+        limit: 12,
+        ...(query ? { q: query } : {}),
+        ...(type !== "all" ? { jobType: type } : {}),
+        ...(sort === "salary" ? { desc: "salary" } : { desc: "dateOfPosting" }),
+      };
+      axios.get(apiList.jobs, { params, headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }).then((response) => {
+        setJobs(response.data.results || response.data);
+        setPageCount(response.data.pages || 1);
+      }).catch((error) => {
+        if (error.response?.status === 404) {
+          setJobs([]);
+          setPageCount(1);
+          return;
+        }
+        setPopup({ open: true, severity: "error", message: error.response?.data?.message || "Unable to load jobs" });
+      });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [page, query, sort, type, setPopup]);
 
   return (
     <main className={classes.page}>
@@ -100,13 +133,14 @@ const Home = () => {
         <TextField className={classes.search} fullWidth variant="outlined" placeholder="Search by role, skill or company" value={query} onChange={(event) => setQuery(event.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> }} />
       </section>
       <div className={classes.toolbar}>
-        <Typography className={classes.count} variant="body2">{visibleJobs.length} opportunities available</Typography>
-        <TextField select size="small" variant="outlined" label="Job type" value={type} onChange={(event) => setType(event.target.value)}><MenuItem value="all">All types</MenuItem><MenuItem value="Full Time">Full time</MenuItem><MenuItem value="Part Time">Part time</MenuItem><MenuItem value="Work From Home">Work from home</MenuItem></TextField>
-        <TextField select size="small" variant="outlined" label="Sort by" value={sort} onChange={(event) => setSort(event.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><TuneIcon fontSize="small" /></InputAdornment> }}><MenuItem value="newest">Newest</MenuItem><MenuItem value="salary">Highest salary</MenuItem></TextField>
+        <Typography className={classes.count} variant="body2">Showing page {page} of {pageCount}</Typography>
+        <TextField select size="small" variant="outlined" label="Job type" value={type} onChange={(event) => { setType(event.target.value); setPage(1); }}><MenuItem value="all">All types</MenuItem><MenuItem value="Full Time">Full time</MenuItem><MenuItem value="Part Time">Part time</MenuItem><MenuItem value="Work From Home">Work from home</MenuItem></TextField>
+        <TextField select size="small" variant="outlined" label="Sort by" value={sort} onChange={(event) => { setSort(event.target.value); setPage(1); }} InputProps={{ startAdornment: <InputAdornment position="start"><TuneIcon fontSize="small" /></InputAdornment> }}><MenuItem value="newest">Newest</MenuItem><MenuItem value="salary">Highest salary</MenuItem></TextField>
       </div>
       <Grid container spacing={2}>
-        {visibleJobs.length ? visibleJobs.map((job) => <Grid item xs={12} sm={6} md={4} key={job._id}><JobTile job={job} /></Grid>) : <Paper className={classes.empty} elevation={0}><Typography variant="h6">No matching opportunities</Typography><Typography variant="body2">Try a different search or job type.</Typography></Paper>}
+        {jobs.length ? jobs.map((job) => <Grid item xs={12} sm={6} md={4} key={job._id}><JobTile job={job} /></Grid>) : <Paper className={classes.empty} elevation={0}><Typography variant="h6">No matching opportunities</Typography><Typography variant="body2">Try a different search or job type.</Typography></Paper>}
       </Grid>
+      {pageCount > 1 && <div style={{ display: "flex", justifyContent: "center", gap: 12, marginTop: 24 }}><Button disabled={page === 1} onClick={() => setPage((current) => current - 1)}>Previous</Button><Button disabled={page === pageCount} onClick={() => setPage((current) => current + 1)}>Next</Button></div>}
     </main>
   );
 };

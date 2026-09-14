@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useContext } from "react";
-import { Button, Chip, Grid, makeStyles, Paper, Typography, Modal } from "@material-ui/core";
+import React, { useCallback, useState, useEffect, useContext } from "react";
+import { Button, Chip, Grid, makeStyles, Paper, Typography, Modal, Step, StepLabel, Stepper } from "@material-ui/core";
 import Rating from "@material-ui/lab/Rating";
 import ScheduleIcon from "@material-ui/icons/Schedule";
 import EventIcon from "@material-ui/icons/Event";
@@ -24,13 +24,23 @@ const useStyles = makeStyles((theme) => ({
 
 const colorSet = {
   applied: "#3454D1",
+  under_review: "#52606d",
   shortlisted: "#DC851F",
+  assessment: "#7C4DFF",
+  interview: "#00897B",
+  offer: "#EF6C00",
+  hired: "#09BC8A",
   accepted: "#09BC8A",
   rejected: "#D1345B",
+  withdrawn: "#8a94a6",
   deleted: "#B49A67",
   cancelled: "#FF8484",
   finished: "#4EA5D9",
 };
+
+const pipeline = ["applied", "under_review", "shortlisted", "assessment", "interview", "offer", "hired"];
+const pipelineLabels = ["Applied", "Under review", "Shortlisted", "Assessment", "Interview", "Offer", "Hired"];
+const statusLabel = { under_review: "Under review", accepted: "Hired", withdrawn: "Withdrawn", cancelled: "Cancelled" };
 
 const ApplicationTile = ({ application }) => {
   const classes = useStyles();
@@ -41,6 +51,7 @@ const ApplicationTile = ({ application }) => {
   const appliedOn = new Date(application.dateOfApplication);
   const joinedOn = new Date(application.dateOfJoining);
   const canRate = application.status === "accepted" || application.status === "finished";
+  const terminal = ["rejected", "withdrawn", "cancelled", "finished", "hired", "accepted"].includes(application.status);
 
   const fetchRating = () => {
     axios
@@ -71,15 +82,24 @@ const ApplicationTile = ({ application }) => {
           <Typography variant="h6">{application.job.title}</Typography>
           <Typography variant="body2" color="textSecondary">Posted by {application.recruiter.name}</Typography>
         </div>
-        <span className={classes.status} style={{ background: colorSet[application.status] || "#52606d" }}>{application.status}</span>
+        <span className={classes.status} style={{ background: colorSet[application.status] || "#52606d" }}>{statusLabel[application.status] || application.status.replace("_", " ")}</span>
       </div>
 
       <div className={classes.chips}>
         {application.job.skillsets.map((skill) => <Chip key={skill} label={skill} size="small" variant="outlined" />)}
       </div>
 
+      {application.status !== "rejected" && application.status !== "cancelled" && (
+        <Stepper activeStep={Math.max(pipeline.indexOf(application.status === "accepted" ? "hired" : application.status), 0)} alternativeLabel style={{ padding: "16px 0 8px", overflowX: "auto" }}>
+          {pipelineLabels.map((label) => <Step key={label}><StepLabel>{label}</StepLabel></Step>)}
+        </Stepper>
+      )}
+      <Typography variant="caption" color="textSecondary">Last updated {new Date(application.updatedAt || application.dateOfApplication).toLocaleDateString()}</Typography>
+      {application.statusHistory?.length > 0 && <div style={{ marginTop: 12 }}>{application.statusHistory.map((event, index) => <Typography variant="caption" display="block" key={`${event.changedAt}-${index}`} color="textSecondary">{new Date(event.changedAt).toLocaleDateString()} · {statusLabel[event.newStatus] || event.newStatus.replace("_", " ")}{event.recruiterNote ? ` · ${event.recruiterNote}` : ""}</Typography>)}</div>}
+
       <div className={classes.detail}><ScheduleIcon className={classes.icon} /> ₹{application.job.salary} / month · {application.job.duration !== 0 ? `${application.job.duration} months` : "Flexible duration"}</div>
       <div className={classes.detail}><EventIcon className={classes.icon} /> Applied on {appliedOn.toLocaleDateString()}{canRate ? ` · Joined ${joinedOn.toLocaleDateString()}` : ""}</div>
+      <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}><Button variant="outlined" href={`/home#job-${application.job._id}`}>View job</Button>{!terminal && <Button color="secondary" onClick={() => { if (window.confirm("Withdraw this application?")) { axios.put(`${apiList.applications}/${application._id}`, { status: "withdrawn" }, { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }).then(() => { setPopup({ open: true, severity: "success", message: "Application withdrawn" }); window.location.reload(); }).catch((error) => setPopup({ open: true, severity: "error", message: error.response?.data?.message || "Unable to withdraw application" })); } }}>Withdraw application</Button>}</div>
 
       {canRate && (
         <Button variant="outlined" color="primary" style={{ marginTop: 16 }} onClick={() => { fetchRating(); setOpen(true); }}>
@@ -103,14 +123,14 @@ const Applications = () => {
   const setPopup = useContext(SetPopupContext);
   const [applications, setApplications] = useState([]);
 
-  useEffect(() => { getData(); }, []);
-
-  const getData = () => {
+  const getData = useCallback(() => {
     axios
       .get(apiList.applications, { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } })
       .then((response) => setApplications(response.data))
       .catch(() => setPopup({ open: true, severity: "error", message: "Unable to load applications" }));
-  };
+  }, [setPopup]);
+
+  useEffect(() => { getData(); }, [getData]);
 
   return (
     <main className={classes.page}>

@@ -11,15 +11,18 @@ const FileUploadInput = (props) => {
   const { uploadTo, identifier, handleInput } = props;
 
   const [file, setFile] = useState("");
+  const [uploading, setUploading] = useState(false);
   const [uploadPercentage, setUploadPercentage] = useState(0);
 
   const handleUpload = () => {
-    console.log(file);
+    if (!file) return;
+    setUploading(true);
     const data = new FormData();
     data.append("file", file);
     Axios.post(uploadTo, data, {
       headers: {
         "Content-Type": "multipart/form-data",
+        Authorization: `Bearer ${localStorage.getItem("token")}`,
       },
       onUploadProgress: (progressEvent) => {
         setUploadPercentage(
@@ -30,7 +33,6 @@ const FileUploadInput = (props) => {
       },
     })
       .then((response) => {
-        console.log(response.data);
         handleInput(identifier, response.data.url);
         setPopup({
           open: true,
@@ -39,16 +41,16 @@ const FileUploadInput = (props) => {
         });
       })
       .catch((err) => {
-        console.log(err.response);
         setPopup({
           open: true,
           severity: "error",
-          message: err.response.statusText,
+          message: err.response?.data?.message || "File upload failed",
           //   message: err.response.data
           //     ? err.response.data.message
           //     : err.response.statusText,
         });
-      });
+      })
+      .finally(() => setUploading(false));
   };
 
   return (
@@ -66,7 +68,6 @@ const FileUploadInput = (props) => {
               type="file"
               style={{ display: "none" }}
               onChange={(event) => {
-                console.log(event.target.files);
                 setUploadPercentage(0);
                 setFile(event.target.files[0]);
               }}
@@ -95,9 +96,9 @@ const FileUploadInput = (props) => {
             color="secondary"
             style={{ width: "100%", height: "100%" }}
             onClick={() => handleUpload()}
-            disabled={file ? false : true}
+            disabled={!file || uploading}
           >
-            <CloudUpload />
+            {uploading ? "..." : <CloudUpload />}
           </Button>
         </Grid>
       </Grid>

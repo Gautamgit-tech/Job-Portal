@@ -25,7 +25,7 @@ import apiList from "../lib/apiList";
 import isAuth from "../lib/isAuth";
 
 const useStyles = makeStyles((theme) => ({
-  page: { width: "100%", minHeight: "calc(100vh - 64px)", padding: theme.spacing(3, 4, 4), display: "flex", alignItems: "flex-start", justifyContent: "center", background: "#f4f7f9", boxSizing: "border-box", overflowY: "auto" },
+  page: { width: "100%", minHeight: "100vh", padding: theme.spacing(3, 4, 4), display: "flex", alignItems: "flex-start", justifyContent: "center", background: "#f4f7f9", boxSizing: "border-box", overflowY: "auto" },
   shell: { width: "100%", maxWidth: 1180, minHeight: "calc(100vh - 112px)", display: "grid", gridTemplateColumns: "minmax(0, .95fr) minmax(0, 1.05fr)", overflow: "hidden", borderRadius: 24, background: "#fff", boxShadow: "0 24px 70px rgba(16, 42, 67, .18)", alignItems: "stretch", [theme.breakpoints.down("sm")]: { gridTemplateColumns: "1fr", minHeight: 0 } },
   formSide: { gridColumn: 2, gridRow: 1, padding: theme.spacing(4, 6), minHeight: 0, maxHeight: "calc(100vh - 112px)", overflowY: "auto", overscrollBehavior: "contain", scrollbarWidth: "thin", [theme.breakpoints.down("sm")]: { gridColumn: 1, gridRow: 2, padding: theme.spacing(3, 2), maxHeight: "none", overflowY: "visible" } },
   art: { gridColumn: 1, gridRow: 1, position: "relative", overflow: "hidden", padding: theme.spacing(6), color: "#fff", background: "linear-gradient(145deg, #46166b 0%, #c21783 48%, #f22b65 100%)", display: "flex", flexDirection: "column", justifyContent: "space-between", [theme.breakpoints.down("sm")]: { minHeight: 210, padding: theme.spacing(4), gridColumn: 1, gridRow: 1 } },
@@ -127,7 +127,9 @@ const Signup = (props) => {
     resume: "",
     profile: "",
     bio: "",
+    companyName: "",
   });
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const [phone, setPhone] = useState("");
 
@@ -153,28 +155,33 @@ const Signup = (props) => {
   };
 
   const handleSendOtp = () => {
-    const tmpErrorHandler = {};
-    Object.keys(inputErrorHandler).forEach((obj) => {
-      if (inputErrorHandler[obj].required && inputErrorHandler[obj].untouched) {
-        tmpErrorHandler[obj] = {
-          required: true,
-          untouched: false,
-          error: true,
-          message: `${obj[0].toUpperCase() + obj.substr(1)} is required`,
-        };
-      } else {
-        tmpErrorHandler[obj] = inputErrorHandler[obj];
-      }
-    });
+    const email = signupDetails.email.trim();
+    const emailValid = /^\S+@\S+\.\S+$/.test(email);
+    const nameValid = signupDetails.name.trim().length >= 2;
+    const passwordValid = signupDetails.password.length >= 8;
+    const tmpErrorHandler = {
+      email: { required: true, untouched: false, error: !emailValid, message: !email ? "Email is required" : "Incorrect email format" },
+      name: { required: true, untouched: false, error: !nameValid, message: "Name is required" },
+      password: { required: true, untouched: false, error: !passwordValid, message: "Password must be at least 8 characters" },
+    };
+
+    if (!emailValid || !nameValid || !passwordValid) {
+      setInputErrorHandler(tmpErrorHandler);
+      setPopup({ open: true, severity: "error", message: "Please correct the highlighted fields" });
+      return;
+    }
 
     if (phone.length < 10) {
       setPopup({ open: true, severity: "error", message: "Enter a valid mobile number" });
       return;
     }
 
-    if (signupDetails.password.length < 6) {
-      handleInputError("password", true, "Password must be at least 6 characters");
-      setPopup({ open: true, severity: "error", message: "Password must be at least 6 characters" });
+    if (signupDetails.password !== confirmPassword) {
+      setPopup({ open: true, severity: "error", message: "Passwords do not match" });
+      return;
+    }
+    if (signupDetails.type === "recruiter" && signupDetails.companyName.trim().length < 2) {
+      setPopup({ open: true, severity: "error", message: "Company name is required for recruiters" });
       return;
     }
 
@@ -189,17 +196,9 @@ const Signup = (props) => {
     };
     setSignupDetails(updatedDetails);
 
-    const verified = !Object.keys(tmpErrorHandler).some((obj) => tmpErrorHandler[obj].error);
-
-    if (!verified) {
-      setInputErrorHandler(tmpErrorHandler);
-      setPopup({ open: true, severity: "error", message: "Incorrect Input" });
-      return;
-    }
-
     setLoading(true);
     axios
-      .post(apiList.sendSignupOtp, { email: updatedDetails.email, phone: `+${phone}` })
+      .post(apiList.sendSignupOtp, { email: updatedDetails.email.trim().toLowerCase(), phone: `+${phone}` })
       .then(() => {
         setStep("otp");
         setPopup({ open: true, severity: "success", message: "OTP sent to your email" });
@@ -216,7 +215,7 @@ const Signup = (props) => {
       return;
     }
     setLoading(true);
-    const finalPayload = { ...signupDetails, phone: `+${phone}`, otp };
+    const finalPayload = { ...signupDetails, email: signupDetails.email.trim().toLowerCase(), phone: `+${phone}`, otp };
     axios
       .post(apiList.signup, finalPayload)
       .then((response) => {
@@ -232,7 +231,7 @@ const Signup = (props) => {
   };
 
   return loggedin ? (
-    <Redirect to="/" />
+    <Redirect to={localStorage.getItem("type") === "recruiter" ? "/myjobs" : "/home"} />
   ) : (
     <main className={classes.page}>
       <Paper elevation={0} className={classes.shell}>
@@ -248,7 +247,7 @@ const Signup = (props) => {
               <Grid item>
                 <TextField
                   select
-                  label="Category"
+                  label="Account type"
                   variant="outlined"
                   className={classes.inputBox}
                   value={signupDetails.type}
@@ -290,13 +289,16 @@ const Signup = (props) => {
                   value={signupDetails.password}
                   onChange={(event) => handleInput("password", event.target.value)}
                   error={inputErrorHandler.password.error}
-                  helperText={inputErrorHandler.password.message || "At least 6 characters"}
+                  helperText={inputErrorHandler.password.message || "At least 8 characters"}
                   className={classes.inputBox}
                   onBlur={(event) => {
                     if (event.target.value.length < 6) handleInputError("password", true, "Password must be at least 6 characters");
                     else handleInputError("password", false, "");
                   }}
                 />
+              </Grid>
+              <Grid item>
+                <PasswordInput label="Confirm password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={classes.inputBox} helperText="Re-enter your password" />
               </Grid>
               <Grid item>
                 <Typography variant="caption" style={{ color: "#52606d", marginBottom: 4, display: "block" }}>
@@ -345,6 +347,10 @@ const Signup = (props) => {
                   </Grid>
                 </>
               ) : (
+                <>
+                <Grid item style={{ width: "100%" }}>
+                  <TextField label="Company name" variant="outlined" fullWidth value={signupDetails.companyName} onChange={(event) => handleInput("companyName", event.target.value)} autoComplete="organization" />
+                </Grid>
                 <Grid item style={{ width: "100%" }}>
                   <TextField
                     label="Bio (upto 250 words)"
@@ -360,6 +366,7 @@ const Signup = (props) => {
                     }}
                   />
                 </Grid>
+                </>
               )}
 
               <Grid item>

@@ -56,8 +56,40 @@ let schema = new mongoose.Schema(
     profile: {
       type: String,
     },
+    headline: { type: String, trim: true, maxlength: 160 },
+    location: { type: String, trim: true, maxlength: 120 },
+    experience: [{
+      title: String,
+      company: String,
+      employmentType: String,
+      startDate: Date,
+      endDate: Date,
+      description: String,
+    }],
+    projects: [{
+      name: String,
+      description: String,
+      technologies: [String],
+      url: String,
+    }],
+    certifications: [{
+      name: String,
+      issuer: String,
+      date: Date,
+      url: String,
+    }],
+    github: { type: String, trim: true },
+    linkedin: { type: String, trim: true },
+    portfolio: { type: String, trim: true },
+    savedJobs: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "jobs",
+    }],
   },
   { collation: { locale: "en" } }
 );
+
+schema.index({ userId: 1 }, { unique: true });
+schema.index({ savedJobs: 1 });
 
 module.exports = mongoose.model("JobApplicantInfo", schema);

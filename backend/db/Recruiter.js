@@ -9,7 +9,10 @@ let schema = new mongoose.Schema(
     name: {
       type: String,
       required: true,
+      trim: true,
+      minlength: 2,
     },
+    companyName: { type: String, trim: true, default: "" },
     contactNumber: {
       type: String,
       validate: {

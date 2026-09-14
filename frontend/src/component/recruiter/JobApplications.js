@@ -342,6 +342,7 @@ const ApplicationTile = (props) => {
   const { application, getData } = props;
   const setPopup = useContext(SetPopupContext);
   const [open, setOpen] = useState(false);
+  const [recruiterNote, setRecruiterNote] = useState("");
 
   const appliedOn = new Date(application.dateOfApplication);
 
@@ -393,10 +394,12 @@ const ApplicationTile = (props) => {
   };
 
   const updateStatus = (status) => {
+    if (!window.confirm(`Move this application to ${status.replace("_", " ")}?`)) return;
     const address = `${apiList.applications}/${application._id}`;
     const statusData = {
       status: status,
       dateOfJoining: new Date().toISOString(),
+      recruiterNote,
     };
     axios
       .put(address, statusData, {
@@ -410,6 +413,7 @@ const ApplicationTile = (props) => {
           severity: "success",
           message: response.data.message,
         });
+        setRecruiterNote("");
         getData();
       })
       .catch((err) => {
@@ -595,6 +599,19 @@ const ApplicationTile = (props) => {
           </Grid>
         </Grid>
         <Grid item container direction="column" xs={3}>
+          <Grid item>
+            <TextField select fullWidth size="small" label="Move stage" value="" onChange={(event) => updateStatus(event.target.value)} style={{ marginBottom: 12 }}>
+              <MenuItem value="" disabled>Select status</MenuItem>
+              <MenuItem value="under_review">Under review</MenuItem>
+              <MenuItem value="shortlisted">Shortlisted</MenuItem>
+              <MenuItem value="assessment">Assessment</MenuItem>
+              <MenuItem value="interview">Interview</MenuItem>
+              <MenuItem value="offer">Offer</MenuItem>
+              <MenuItem value="hired">Hired</MenuItem>
+              <MenuItem value="rejected">Rejected</MenuItem>
+            </TextField>
+            <TextField fullWidth size="small" multiline minRows={2} label="Private recruiter note" value={recruiterNote} onChange={(event) => setRecruiterNote(event.target.value)} style={{ marginBottom: 12 }} />
+          </Grid>
           <Grid item>
             <Button
               variant="contained"

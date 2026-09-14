@@ -1,24 +1,70 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const authKeys = require("../lib/authKeys");
 const otpService = require("../lib/otpService");
 
 const User = require("../db/User");
 const JobApplicant = require("../db/JobApplicant");
 const Recruiter = require("../db/Recruiter");
+const SignupOtp = require("../db/SignupOtp");
 
 const router = express.Router();
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+
+router.post("/request-password-reset", async (req, res) => {
+  const email = String(req.body.email || "").trim().toLowerCase();
+  const generic = { message: "If an account exists, password reset instructions have been sent." };
+  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(200).json(generic);
+  try {
+    const user = await User.findOne({ email });
+    if (!user) return res.status(200).json(generic);
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    user.passwordResetToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+    user.passwordResetExpiry = new Date(Date.now() + 15 * 60 * 1000);
+    await user.save();
+    await otpService.sendPasswordResetEmail(user.email, rawToken);
+    res.status(200).json(generic);
+  } catch (err) {
+    res.status(200).json(generic);
+  }
+});
+
+router.post("/reset-password", async (req, res) => {
+  const token = String(req.body.token || "");
+  const password = String(req.body.password || "");
+  if (!token || password.length < 8) return res.status(400).json({ message: "A valid token and password of at least 8 characters are required" });
+  try {
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+    const user = await User.findOne({ passwordResetToken: hashedToken, passwordResetExpiry: { $gt: new Date() } }).select("+passwordResetToken +passwordResetExpiry");
+    if (!user) return res.status(400).json({ message: "Reset token is invalid or expired" });
+    user.password = password;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpiry = undefined;
+    await user.save();
+    res.json({ message: "Password updated successfully" });
+  } catch (err) {
+    res.status(400).json({ message: "Unable to reset password" });
+  }
+});
 
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, type } = req.body;
   if (!email || !password) {
     return res.status(400).json({ message: "Email and password are required" });
+  }
+  if (type && !["applicant", "recruiter"].includes(type)) {
+    return res.status(400).json({ message: "Invalid account type" });
   }
 
   try {
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    if (type && user.type !== type) {
+      return res.status(403).json({ message: user.type === "recruiter" ? "This account is registered as a Recruiter. Please select the correct login option." : "This account is registered as a Job Seeker. Please select the correct login option." });
     }
 
     await user.login(password);
@@ -31,12 +77,13 @@ router.post("/login", async (req, res) => {
 
 // STEP 1 - Signup: OTP bhejo
 router.post("/send-signup-otp", async (req, res) => {
-  const { email, phone } = req.body;
-  if (!email || !phone) {
+  const email = normalizeEmail(req.body.email);
+  const phone = String(req.body.phone || "").trim();
+  if (!email || !/^\S+@\S+\.\S+$/.test(email) || !phone) {
     return res.status(400).json({ message: "Email and phone are required" });
   }
   try {
-    const existingEmail = await User.findOne({ email: email.toLowerCase() });
+    const existingEmail = await User.findOne({ email });
     if (existingEmail) {
       return res.status(400).json({ message: "An account with this email already exists" });
     }
@@ -45,11 +92,22 @@ router.post("/send-signup-otp", async (req, res) => {
       return res.status(400).json({ message: "An account with this phone number already exists" });
     }
     const otp = otpService.generateOtp();
-    otpService.saveSignupOtp(email.toLowerCase(), otp);
     await otpService.sendOtpEmail(email, otp);
+    await SignupOtp.findOneAndUpdate(
+      { email },
+      {
+        email,
+        otpHash: crypto.createHash("sha256").update(otp).digest("hex"),
+        expiresAt: new Date(Date.now() + otpService.OTP_EXPIRY_MS),
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
     res.json({ message: "OTP sent to your email" });
   } catch (err) {
     console.log(err);
+    if (err.message === "Email service is not configured") {
+      return res.status(503).json({ message: "Email service is not configured. Add EMAIL_USER and EMAIL_PASS to backend/.env." });
+    }
     res.status(500).json({ message: "Failed to send OTP. Please try again." });
   }
 });
@@ -57,18 +115,30 @@ router.post("/send-signup-otp", async (req, res) => {
 // STEP 2 - Signup: OTP verify karke account banao
 router.post("/signup", async (req, res) => {
   const data = req.body;
-  if (!data.otp) {
+  if (!data.otp || !["applicant", "recruiter"].includes(data.type)) {
     return res.status(400).json({ message: "OTP is required" });
   }
-  const verification = otpService.verifySignupOtp(data.email.toLowerCase(), data.otp);
-  if (!verification.valid) {
-    return res.status(400).json({ message: verification.message });
+  const email = normalizeEmail(data.email);
+  const name = String(data.name || "").trim();
+  const password = String(data.password || "");
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ message: "Enter a valid email address" });
+  if (name.length < 2) return res.status(400).json({ message: "Name is required" });
+  if (password.length < 8) return res.status(400).json({ message: "Password must be at least 8 characters" });
+  if (data.type === "recruiter" && String(data.companyName || "").trim().length < 2) return res.status(400).json({ message: "Company name is required for recruiters" });
+  const otpHash = crypto.createHash("sha256").update(String(data.otp).trim()).digest("hex");
+  const otpRecord = await SignupOtp.findOne({ email });
+  if (!otpRecord) return res.status(400).json({ message: "OTP not found. Please request a new one." });
+  if (otpRecord.expiresAt.getTime() < Date.now()) {
+    await SignupOtp.deleteOne({ _id: otpRecord._id });
+    return res.status(400).json({ message: "OTP expired. Please request a new one." });
   }
+  if (otpRecord.otpHash !== otpHash) return res.status(400).json({ message: "Incorrect OTP." });
+  await SignupOtp.deleteOne({ _id: otpRecord._id });
 
   let user = new User({
-    email: data.email,
+    email,
     phone: data.phone,
-    password: data.password,
+    password,
     type: data.type,
   });
 
@@ -79,6 +149,7 @@ router.post("/signup", async (req, res) => {
         ? new Recruiter({
             userId: user._id,
             name: data.name,
+            companyName: String(data.companyName || "").trim(),
             contactNumber: data.phone,
             bio: data.bio,
           })

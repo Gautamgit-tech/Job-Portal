@@ -10,6 +10,26 @@ let schema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    location: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    workMode: {
+      type: String,
+      enum: ["Remote", "Hybrid", "On-site", ""],
+      default: "",
+    },
+    experienceLevel: {
+      type: String,
+      enum: ["Internship", "Entry level", "Mid level", "Senior level", ""],
+      default: "",
+    },
+    category: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     maxApplicants: {
       type: Number,
       validate: [

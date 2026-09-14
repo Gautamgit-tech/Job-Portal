@@ -1,5 +1,7 @@
+const crypto = require("crypto");
+
 module.exports = {
-  jwtSecretKey: "jwt_secret",
-  emailUser: "gautamkumar060606@gmail.com",       // Apna Gmail address
-  emailPass: "vbft mfkw lcbs wllb",     // Gmail App Password (neeche steps hai)
+  jwtSecretKey: process.env.JWT_SECRET || crypto.randomBytes(32).toString("hex"),
+  emailUser: process.env.EMAIL_USER,
+  emailPass: (process.env.EMAIL_PASS || "").replace(/\s+/g, ""),
 };

@@ -3,7 +3,8 @@ const isAuth = () => {
 };
 
 export const userType = () => {
-  return localStorage.getItem("type");
+  const type = localStorage.getItem("type");
+  return type === "member" || type === "jobseeker" ? "applicant" : type;
 };
 
 export default isAuth;

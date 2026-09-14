@@ -1,18 +1,26 @@
 const nodemailer = require("nodemailer");
 const authKeys = require("./authKeys");
 
+const emailConfigured = Boolean(authKeys.emailUser && authKeys.emailPass);
+
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: authKeys.emailUser,
     pass: authKeys.emailPass,
   },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 10000,
 });
 
 const generateOtp = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 
 const sendOtpEmail = (toEmail, otp) => {
+  if (!emailConfigured) {
+    return Promise.reject(new Error("Email service is not configured"));
+  }
   const mailOptions = {
     from: authKeys.emailUser,
     to: toEmail,
@@ -25,6 +33,16 @@ const sendOtpEmail = (toEmail, otp) => {
     </div>`,
   };
   return transporter.sendMail(mailOptions);
+};
+
+const sendPasswordResetEmail = (toEmail, resetToken) => {
+  if (!emailConfigured) return Promise.reject(new Error("Email service is not configured"));
+  return transporter.sendMail({
+    from: authKeys.emailUser,
+    to: toEmail,
+    subject: "Job Portal - Reset your password",
+    html: `<div style="font-family: sans-serif;"><h2>Password reset</h2><p>Use this one-time reset token within 15 minutes:</p><p>${resetToken}</p></div>`,
+  });
 };
 
 // Signup ke liye temporary OTP store (server restart pe clear ho jayega)
@@ -53,6 +71,7 @@ const verifySignupOtp = (email, otp) => {
 module.exports = {
   generateOtp,
   sendOtpEmail,
+  sendPasswordResetEmail,
   saveSignupOtp,
   verifySignupOtp,
   OTP_EXPIRY_MS,

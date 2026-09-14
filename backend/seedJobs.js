@@ -19,7 +19,7 @@ const catalog = [
 async function seed() {
   await mongoose.connect("mongodb://localhost:27017/jobPortal", { useNewUrlParser: true, useUnifiedTopology: true, useCreateIndex: true });
   let user = await User.findOne({ email: "demo.recruiter@jobportal.dev" });
-  if (!user) user = await new User({ email: "demo.recruiter@jobportal.dev", password: "DemoRecruiter123!", type: "recruiter" }).save();
+  if (!user) user = await new User({ email: "demo.recruiter@jobportal.dev", phone: "+919876543210", password: "DemoRecruiter123!", type: "recruiter" }).save();
   await Recruiter.findOneAndUpdate({ userId: user._id }, { userId: user._id, name: "Northstar Talent Co.", contactNumber: "+919876543210", bio: "A product-led team hiring curious people for meaningful work." }, { upsert: true, new: true, setDefaultsOnInsert: true });
   await Job.deleteMany({ userId: user._id });
   const jobs = Array.from({ length: 50 }, (_, index) => {

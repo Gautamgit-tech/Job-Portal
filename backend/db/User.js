@@ -38,9 +38,13 @@ let schema = new mongoose.Schema(
       type: Date,
       select: false,
     },
+    passwordResetToken: { type: String, select: false },
+    passwordResetExpiry: { type: Date, select: false },
   },
   { collation: { locale: "en" } }
 );
+
+schema.index({ email: 1 }, { unique: true });
 
 schema.pre("save", function (next) {
   let user = this;

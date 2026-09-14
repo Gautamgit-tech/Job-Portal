@@ -18,11 +18,17 @@ let schema = new mongoose.Schema(
       type: String,
       enum: [
         "applied", // when a applicant is applied
+        "under_review",
         "shortlisted", // when a applicant is shortlisted
+        "assessment",
+        "interview",
+        "offer",
+        "hired",
         "accepted", // when a applicant is accepted
         "rejected", // when a applicant is rejected
         "deleted", // when any job is deleted
         "cancelled", // an application is cancelled by its author or when other application is accepted
+        "withdrawn",
         "finished", // when job is over
       ],
       default: "applied",
@@ -52,9 +58,21 @@ let schema = new mongoose.Schema(
         msg: "Statement of purpose should not be greater than 250 words",
       },
     },
+    statusHistory: [
+      {
+        previousStatus: { type: String },
+        newStatus: { type: String, required: true },
+        changedBy: { type: mongoose.Schema.Types.ObjectId, required: true },
+        changedAt: { type: Date, default: Date.now },
+        recruiterNote: { type: String, trim: true, maxlength: 2000 },
+      },
+    ],
   },
-  { collation: { locale: "en" } }
+  { collation: { locale: "en" }, timestamps: true }
 );
+
+schema.index({ userId: 1, dateOfApplication: -1 });
+schema.index({ recruiterId: 1, jobId: 1, status: 1 });
 
 // schema.virtual("applicationUser", {
 //   ref: "JobApplicantInfo",

@@ -6,6 +6,7 @@ import {
   Typography,
   makeStyles,
   Paper,
+  CircularProgress,
 } from "@material-ui/core";
 import axios from "axios";
 import { Redirect } from "react-router-dom";
@@ -16,7 +17,7 @@ import isAuth from "../lib/isAuth";
 import PasswordInput from "../lib/PasswordInput";
 
 const useStyles = makeStyles((theme) => ({
-  page: { width: "100%", minHeight: "calc(100vh - 64px)", padding: theme.spacing(4), display: "flex", alignItems: "center", justifyContent: "center", background: "#f4f7f9", boxSizing: "border-box" },
+  page: { width: "100%", minHeight: "100vh", padding: theme.spacing(4), display: "flex", alignItems: "center", justifyContent: "center", background: "#f4f7f9", boxSizing: "border-box" },
   shell: { width: "100%", maxWidth: 1080, minHeight: 610, display: "grid", gridTemplateColumns: "minmax(0, 0.9fr) minmax(0, 1.1fr)", overflow: "hidden", borderRadius: 24, background: "#fff", boxShadow: "0 24px 70px rgba(16, 42, 67, .18)", [theme.breakpoints.down("sm")]: { gridTemplateColumns: "1fr", minHeight: 0 } },
   formSide: { padding: theme.spacing(6, 7), display: "flex", flexDirection: "column", justifyContent: "center", [theme.breakpoints.down("sm")]: { padding: theme.spacing(4, 3) } },
   art: { position: "relative", overflow: "hidden", padding: theme.spacing(6), color: "#fff", background: "linear-gradient(145deg, #46166b 0%, #c21783 48%, #f22b65 100%)", display: "flex", flexDirection: "column", justifyContent: "space-between", [theme.breakpoints.down("sm")]: { minHeight: 220, padding: theme.spacing(4) } },
@@ -32,6 +33,9 @@ const useStyles = makeStyles((theme) => ({
   orbTwo: { width: 120, height: 120, right: 180, bottom: 90 },
   artFooter: { position: "relative", zIndex: 1, fontSize: 13, color: "rgba(255,255,255,.75)" },
   switch: { textAlign: "center", marginTop: theme.spacing(2), color: "#52606d" },
+  roleSelect: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 5, background: "#f4f7f9", borderRadius: 12 },
+  roleButton: { minHeight: 44, color: "#52606d" },
+  roleActive: { background: "#fff", color: "#c21783", boxShadow: "0 4px 14px rgba(16,42,67,.10)" },
 }));
 
 const Login = (props) => {
@@ -42,15 +46,16 @@ const Login = (props) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [role, setRole] = useState("applicant");
 
   const handleLogin = () => {
-    if (!email || !password) {
+    if (!/^\S+@\S+\.\S+$/.test(email.trim()) || !password) {
       setPopup({ open: true, severity: "error", message: "Email and password are required" });
       return;
     }
     setLoading(true);
     axios
-      .post(apiList.login, { email, password })
+      .post(apiList.login, { email: email.trim(), password, type: role })
       .then((response) => {
         localStorage.setItem("token", response.data.token);
         localStorage.setItem("type", response.data.type);
@@ -64,18 +69,23 @@ const Login = (props) => {
   };
 
   return loggedin ? (
-    <Redirect to="/" />
+    <Redirect to={role === "recruiter" ? "/myjobs" : "/home"} />
   ) : (
     <main className={classes.page}>
       <Paper elevation={0} className={classes.shell}>
         <section className={classes.formSide}>
-          <Typography variant="overline" className={classes.eyebrow}>JOB PORTAL / MEMBER ACCESS</Typography>
+          <Typography variant="overline" className={classes.eyebrow}>JOB PORTAL / SECURE ACCESS</Typography>
           <Typography variant="h3" component="h1" className={classes.title}>Welcome back.</Typography>
           <Typography variant="body1" className={classes.subtitle}>
-            Sign in with your registered email and password.
+            Sign in as a {role === "recruiter" ? "Recruiter" : "Job Seeker"}.
           </Typography>
 
           <Grid container direction="column" spacing={3} style={{ marginTop: 18 }}>
+            <Grid item>
+              <div className={classes.roleSelect} role="group" aria-label="Account type">
+                {[['applicant', 'Job Seeker'], ['recruiter', 'Recruiter']].map(([value, label]) => <Button key={value} className={`${classes.roleButton} ${role === value ? classes.roleActive : ""}`} onClick={() => setRole(value)}>{label}</Button>)}
+              </div>
+            </Grid>
             <Grid item>
               <TextField
                 label="Email"
@@ -84,6 +94,7 @@ const Login = (props) => {
                 onChange={(event) => setEmail(event.target.value)}
                 className={classes.inputBox}
                 variant="outlined"
+                autoComplete="email"
               />
             </Grid>
             <Grid item>
@@ -92,15 +103,19 @@ const Login = (props) => {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className={classes.inputBox}
+                autoComplete="current-password"
               />
             </Grid>
             <Grid item>
               <Button variant="contained" color="primary" disabled={loading} onClick={handleLogin} className={classes.submitButton}>
-                {loading ? "Signing in..." : "Sign in"}
+                {loading ? <CircularProgress size={20} color="inherit" /> : "Sign in"}
               </Button>
             </Grid>
           </Grid>
 
+          <Typography variant="body2" className={classes.switch}>
+            <Button color="primary" href="/forgot-password">Forgot password?</Button>
+          </Typography>
           <Typography variant="body2" className={classes.switch}>
             New to Job Portal? <Button color="primary" href="/signup">Create an account</Button>
           </Typography>

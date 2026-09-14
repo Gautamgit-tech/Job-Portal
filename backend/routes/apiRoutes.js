@@ -8,6 +8,23 @@ const Recruiter = require("../db/Recruiter");
 const Job = require("../db/Job");
 const Application = require("../db/Application");
 const Rating = require("../db/Rating");
+const SavedJob = require("../db/SavedJob");
+
+const allowedStatusTransitions = {
+  applied: ["under_review", "shortlisted", "rejected", "cancelled", "withdrawn"],
+  under_review: ["shortlisted", "rejected", "cancelled", "withdrawn"],
+  shortlisted: ["assessment", "interview", "offer", "accepted", "rejected", "cancelled", "withdrawn"],
+  assessment: ["interview", "rejected", "cancelled", "withdrawn"],
+  interview: ["offer", "rejected", "cancelled", "withdrawn"],
+  offer: ["hired", "rejected", "cancelled", "withdrawn"],
+  hired: ["finished"],
+  accepted: ["finished"],
+  rejected: [],
+  withdrawn: [],
+  cancelled: [],
+  deleted: [],
+  finished: [],
+};
 
 const router = express.Router();
 
@@ -32,6 +49,10 @@ router.post("/jobs", jwtAuth, (req, res) => {
     dateOfPosting: data.dateOfPosting,
     deadline: data.deadline,
     skillsets: data.skillsets,
+    location: data.location,
+    workMode: data.workMode,
+    experienceLevel: data.experienceLevel,
+    category: data.category,
     jobType: data.jobType,
     duration: data.duration,
     salary: data.salary,
@@ -54,6 +75,9 @@ router.get("/jobs", jwtAuth.optional, (req, res) => {
 
   let findParams = {};
   let sortParams = {};
+  const paginated = req.query.page !== undefined || req.query.limit !== undefined;
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 12, 1), 50);
 
   // const page = parseInt(req.query.page) ? parseInt(req.query.page) : 1;
   // const limit = parseInt(req.query.limit) ? parseInt(req.query.limit) : 10;
@@ -70,10 +94,31 @@ router.get("/jobs", jwtAuth.optional, (req, res) => {
   if (req.query.q) {
     findParams = {
       ...findParams,
-      title: {
-        $regex: new RegExp(req.query.q, "i"),
-      },
+      $or: [
+        { title: { $regex: req.query.q, $options: "i" } },
+        { skillsets: { $regex: req.query.q, $options: "i" } },
+      ],
     };
+  }
+
+  if (req.query.location) {
+    findParams.location = { $regex: req.query.location, $options: "i" };
+  }
+
+  if (req.query.workMode) {
+    findParams.workMode = req.query.workMode;
+  }
+
+  if (req.query.experienceLevel) {
+    findParams.experienceLevel = req.query.experienceLevel;
+  }
+
+  if (req.query.category) {
+    findParams.category = { $regex: req.query.category, $options: "i" };
+  }
+
+  if (req.query.postedAfter) {
+    findParams.dateOfPosting = { $gte: new Date(req.query.postedAfter) };
   }
 
   if (req.query.jobType) {
@@ -165,13 +210,6 @@ router.get("/jobs", jwtAuth.optional, (req, res) => {
     }
   }
 
-  console.log(findParams);
-  console.log(sortParams);
-
-  // Job.find(findParams).collation({ locale: "en" }).sort(sortParams);
-  // .skip(skip)
-  // .limit(limit)
-
   let arr = [
     {
       $lookup: {
@@ -203,13 +241,30 @@ router.get("/jobs", jwtAuth.optional, (req, res) => {
     ];
   }
 
-  console.log(arr);
+  const query = Job.aggregate(arr);
+  if (paginated) {
+    query.facet({
+      results: [{ $skip: (page - 1) * limit }, { $limit: limit }],
+      metadata: [{ $count: "total" }],
+    });
+  }
 
-  Job.aggregate(arr)
+  query
     .then((posts) => {
-      if (posts == null) {
+      if (posts == null || (paginated && posts.length === 0)) {
         res.status(404).json({
           message: "No job found",
+        });
+        return;
+      }
+      if (paginated) {
+        const metadata = posts[0].metadata[0] || { total: 0 };
+        res.json({
+          results: posts[0].results,
+          page,
+          limit,
+          total: metadata.total,
+          pages: Math.ceil(metadata.total / limit),
         });
         return;
       }
@@ -346,6 +401,50 @@ router.get("/user", jwtAuth, (req, res) => {
   }
 });
 
+router.get("/applicant-dashboard", jwtAuth, async (req, res) => {
+  if (req.user.type !== "applicant") return res.status(403).json({ message: "Applicant access required" });
+  try {
+    const applicant = await JobApplicant.findOne({ userId: req.user._id }).lean();
+    if (!applicant) return res.status(404).json({ message: "Applicant profile not found" });
+    const account = await User.findById(req.user._id).select("email").lean();
+    const applications = await Application.aggregate([
+      { $match: { userId: req.user._id } },
+      { $lookup: { from: "jobs", localField: "jobId", foreignField: "_id", as: "job" } },
+      { $unwind: { path: "$job", preserveNullAndEmptyArrays: true } },
+      { $lookup: { from: "recruiterinfos", localField: "recruiterId", foreignField: "userId", as: "recruiter" } },
+      { $unwind: { path: "$recruiter", preserveNullAndEmptyArrays: true } },
+      { $sort: { dateOfApplication: -1 } },
+      { $limit: 5 },
+    ]);
+    const statusCounts = await Application.aggregate([
+      { $match: { userId: req.user._id } },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]);
+    const stats = statusCounts.reduce((result, item) => ({ ...result, [item._id]: item.count }), {});
+    const saved = await SavedJob.aggregate([
+      { $match: { applicantId: req.user._id } },
+      { $lookup: { from: "jobs", localField: "jobId", foreignField: "_id", as: "job" } },
+      { $unwind: "$job" },
+      { $lookup: { from: "recruiterinfos", localField: "job.userId", foreignField: "userId", as: "recruiter" } },
+      { $unwind: { path: "$recruiter", preserveNullAndEmptyArrays: true } },
+      { $sort: { createdAt: -1 } },
+      { $limit: 3 },
+      { $project: { _id: 1, createdAt: 1, job: 1, recruiter: 1 } },
+    ]);
+    const skills = (applicant.skills || []).map((skill) => skill.toLowerCase());
+    const recommendations = (await Job.find({ deadline: { $gt: new Date() } }).sort({ dateOfPosting: -1 }).limit(50).lean())
+      .filter((job) => !applications.some((application) => String(application.jobId) === String(job._id)))
+      .map((job) => {
+        const matchedSkills = (job.skillsets || []).filter((skill) => skills.includes(String(skill).toLowerCase()));
+        const score = job.skillsets?.length ? Math.round((matchedSkills.length / job.skillsets.length) * 100) : 0;
+        return { ...job, matchedSkills, matchScore: score };
+      }).sort((left, right) => right.matchScore - left.matchScore || new Date(right.dateOfPosting) - new Date(left.dateOfPosting)).slice(0, 4);
+    res.json({ profile: { ...applicant, email: account?.email || "" }, applications, stats, saved, recommendations });
+  } catch (err) {
+    res.status(500).json({ message: "Unable to load applicant dashboard" });
+  }
+});
+
 // get user details from id
 router.get("/user/:id", jwtAuth, (req, res) => {
   User.findOne({ _id: req.params.id })
@@ -452,6 +551,9 @@ router.put("/user", jwtAuth, (req, res) => {
         if (data.profile) {
           jobApplicant.profile = data.profile;
         }
+        ["headline", "location", "experience", "projects", "certifications", "github", "linkedin", "portfolio"].forEach((key) => {
+          if (data[key] !== undefined) jobApplicant[key] = data[key];
+        });
         console.log(jobApplicant);
         jobApplicant
           .save()
@@ -538,6 +640,10 @@ router.post("/jobs/:id/applications", jwtAuth, (req, res) => {
                             recruiterId: job.userId,
                             jobId: job._id,
                             status: "applied",
+                            statusHistory: [{
+                              newStatus: "applied",
+                              changedBy: user._id,
+                            }],
                             sop: data.sop,
                           });
                           application
@@ -645,7 +751,7 @@ router.get("/applications", jwtAuth, (req, res) => {
         as: "jobApplicant",
       },
     },
-    { $unwind: "$jobApplicant" },
+    { $unwind: { path: "$jobApplicant", preserveNullAndEmptyArrays: true } },
     {
       $lookup: {
         from: "jobs",
@@ -654,7 +760,7 @@ router.get("/applications", jwtAuth, (req, res) => {
         as: "job",
       },
     },
-    { $unwind: "$job" },
+    { $unwind: { path: "$job", preserveNullAndEmptyArrays: true } },
     {
       $lookup: {
         from: "recruiterinfos",
@@ -663,7 +769,7 @@ router.get("/applications", jwtAuth, (req, res) => {
         as: "recruiter",
       },
     },
-    { $unwind: "$recruiter" },
+    { $unwind: { path: "$recruiter", preserveNullAndEmptyArrays: true } },
     {
       $match: {
         [user.type === "recruiter" ? "recruiterId" : "userId"]: user._id,
@@ -688,6 +794,11 @@ router.put("/applications/:id", jwtAuth, (req, res) => {
   const user = req.user;
   const id = req.params.id;
   const status = req.body.status;
+  const recruiterNote = typeof req.body.recruiterNote === "string" ? req.body.recruiterNote.trim() : "";
+
+  if (!Object.prototype.hasOwnProperty.call(allowedStatusTransitions, status)) {
+    return res.status(400).json({ message: "Invalid application status" });
+  }
 
   // "applied", // when a applicant is applied
   // "shortlisted", // when a applicant is shortlisted
@@ -734,12 +845,17 @@ router.put("/applications/:id", jwtAuth, (req, res) => {
             }).then((activeApplicationCount) => {
               if (activeApplicationCount < job.maxPositions) {
                 // accepted
+                if (!allowedStatusTransitions[application.status].includes(status)) {
+                  res.status(409).json({ message: `Cannot move application from ${application.status} to ${status}` });
+                  return;
+                }
+                application.statusHistory.push({ previousStatus: application.status, newStatus: status, changedBy: user._id, recruiterNote });
                 application.status = status;
                 application.dateOfJoining = req.body.dateOfJoining;
                 application
                   .save()
                   .then(() => {
-                    Application.updateMany(
+                    Application.find(
                       {
                         _id: {
                           $ne: application._id,
@@ -754,14 +870,13 @@ router.put("/applications/:id", jwtAuth, (req, res) => {
                             "finished",
                           ],
                         },
-                      },
-                      {
-                        $set: {
-                          status: "cancelled",
-                        },
-                      },
-                      { multi: true }
+                      }
                     )
+                      .then((otherApplications) => Promise.all(otherApplications.map((otherApplication) => {
+                        otherApplication.statusHistory.push({ previousStatus: otherApplication.status, newStatus: "cancelled", changedBy: user._id });
+                        otherApplication.status = "cancelled";
+                        return otherApplication.save();
+                      })))
                       .then(() => {
                         if (status === "accepted") {
                           Job.findOneAndUpdate(
@@ -808,17 +923,12 @@ router.put("/applications/:id", jwtAuth, (req, res) => {
           res.status(400).json(err);
         });
     } else {
-      Application.findOneAndUpdate(
+      Application.findOne(
         {
           _id: id,
           recruiterId: user._id,
           status: {
             $nin: ["rejected", "deleted", "cancelled"],
-          },
-        },
-        {
-          $set: {
-            status: status,
           },
         }
       )
@@ -829,6 +939,17 @@ router.put("/applications/:id", jwtAuth, (req, res) => {
             });
             return;
           }
+          if (!allowedStatusTransitions[application.status].includes(status)) {
+            res.status(409).json({ message: `Cannot move application from ${application.status} to ${status}` });
+            return;
+          }
+          const previousStatus = application.status;
+          application.status = status;
+          application.statusHistory.push({ previousStatus, newStatus: status, changedBy: user._id, recruiterNote });
+          return application.save();
+        })
+        .then((application) => {
+          if (!application) return;
           if (status === "finished") {
             res.json({
               message: `Job ${status} successfully`,
@@ -844,22 +965,30 @@ router.put("/applications/:id", jwtAuth, (req, res) => {
         });
     }
   } else {
-    if (status === "cancelled") {
+    if (status === "cancelled" || status === "withdrawn") {
       console.log(id);
       console.log(user._id);
-      Application.findOneAndUpdate(
+      Application.findOne(
         {
           _id: id,
           userId: user._id,
         },
-        {
-          $set: {
-            status: status,
-          },
-        }
       )
-        .then((tmp) => {
-          console.log(tmp);
+        .then((application) => {
+          if (!application) {
+            res.status(404).json({ message: "Application not found" });
+            return;
+          }
+          if (!allowedStatusTransitions[application.status].includes(status)) {
+            res.status(409).json({ message: `Cannot move application from ${application.status} to ${status}` });
+            return;
+          }
+          application.statusHistory.push({ previousStatus: application.status, newStatus: status, changedBy: user._id });
+          application.status = status;
+          return application.save();
+        })
+        .then((application) => {
+          if (!application) return;
           res.json({
             message: `Application ${status} successfully`,
           });
@@ -1342,6 +1471,74 @@ router.get("/rating", jwtAuth, (req, res) => {
       rating: rating.rating,
     });
   });
+});
+
+const isValidId = (value) => mongoose.Types.ObjectId.isValid(value);
+
+router.get("/saved-jobs", jwtAuth, async (req, res) => {
+  if (req.user.type !== "applicant") return res.status(403).json({ message: "Only applicants can view saved jobs" });
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 12, 1), 50);
+  try {
+    const match = { applicantId: req.user._id };
+    const [savedJobs, total] = await Promise.all([
+      SavedJob.aggregate([
+        { $match: match },
+        { $lookup: { from: "jobs", localField: "jobId", foreignField: "_id", as: "job" } },
+        { $unwind: "$job" },
+        { $lookup: { from: "recruiterinfos", localField: "job.userId", foreignField: "userId", as: "recruiter" } },
+        { $unwind: { path: "$recruiter", preserveNullAndEmptyArrays: true } },
+        { $sort: { createdAt: -1 } },
+        { $skip: (page - 1) * limit },
+        { $limit: limit },
+        { $project: { _id: 1, createdAt: 1, jobId: "$job", recruiter: 1 } },
+      ]),
+      SavedJob.countDocuments(match),
+    ]);
+    res.json({ results: savedJobs, page, limit, total, pages: Math.ceil(total / limit) });
+  } catch (err) {
+    res.status(500).json({ message: "Unable to load saved jobs" });
+  }
+});
+
+router.get("/jobs/:id/saved", jwtAuth, async (req, res) => {
+  if (req.user.type !== "applicant") return res.status(403).json({ message: "Only applicants can check saved jobs" });
+  if (!isValidId(req.params.id)) return res.status(400).json({ message: "Invalid job ID" });
+  try {
+    const saved = await SavedJob.exists({ applicantId: req.user._id, jobId: req.params.id });
+    res.json({ saved: Boolean(saved) });
+  } catch (err) {
+    res.status(500).json({ message: "Unable to check saved job" });
+  }
+});
+
+router.post("/jobs/:id/save", jwtAuth, async (req, res) => {
+  if (req.user.type !== "applicant") return res.status(403).json({ message: "Only applicants can save jobs" });
+  if (!isValidId(req.params.id)) return res.status(400).json({ message: "Invalid job ID" });
+  try {
+    const job = await Job.findById(req.params.id).select("_id").lean();
+    if (!job) return res.status(404).json({ message: "Job does not exist" });
+    const savedJob = await SavedJob.findOneAndUpdate(
+      { applicantId: req.user._id, jobId: job._id },
+      { $setOnInsert: { applicantId: req.user._id, jobId: job._id } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    res.status(savedJob.createdAt === savedJob.updatedAt ? 201 : 200).json({ message: "Job saved", saved: true });
+  } catch (err) {
+    if (err.code === 11000) return res.status(200).json({ message: "Job already saved", saved: true });
+    res.status(500).json({ message: "Unable to save job" });
+  }
+});
+
+router.delete("/jobs/:id/save", jwtAuth, async (req, res) => {
+  if (req.user.type !== "applicant") return res.status(403).json({ message: "Only applicants can unsave jobs" });
+  if (!isValidId(req.params.id)) return res.status(400).json({ message: "Invalid job ID" });
+  try {
+    const result = await SavedJob.deleteOne({ applicantId: req.user._id, jobId: req.params.id });
+    res.json({ message: result.deletedCount ? "Job removed from saved jobs" : "Job was not saved", saved: false });
+  } catch (err) {
+    res.status(500).json({ message: "Unable to remove saved job" });
+  }
 });
 
 // Application.findOne({
