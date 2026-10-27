@@ -69,7 +69,7 @@ const Login = (props) => {
   };
 
   return loggedin ? (
-    <Redirect to={role === "recruiter" ? "/myjobs" : "/home"} />
+    <Redirect to={role === "recruiter" ? "/recruiter-dashboard" : "/home"} />
   ) : (
     <main className={classes.page}>
       <Paper elevation={0} className={classes.shell}>

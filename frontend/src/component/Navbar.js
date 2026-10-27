@@ -19,7 +19,7 @@ const useStyles = makeStyles((theme) => ({
 
 const linksForUser = () => {
   if (!isAuth()) return [["Login", "/login"], ["Signup", "/signup"]];
-  if (userType() === "recruiter") return [["Home", "/home"], ["Add jobs", "/addjob"], ["My jobs", "/myjobs"], ["Employees", "/employees"], ["Profile", "/profile"], ["Logout", "/logout"]];
+  if (userType() === "recruiter") return [["Dashboard", "/recruiter-dashboard"], ["Add jobs", "/addjob"], ["My jobs", "/myjobs"], ["Employees", "/employees"], ["Profile", "/profile"], ["Logout", "/logout"]];
   return [["Home", "/home"], ["Dashboard", "/profile"], ["Applications", "/applications"], ["Saved jobs", "/saved-jobs"], ["Logout", "/logout"]];
 };
 

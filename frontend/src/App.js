@@ -1,4 +1,4 @@
-import React, { createContext, useState } from "react";
+import React, { createContext, useEffect, useState } from "react";
 import { BrowserRouter, Switch, Route, Redirect, useLocation } from "react-router-dom";
 import { Grid, makeStyles, ThemeProvider, CssBaseline } from "@material-ui/core";
 
@@ -18,8 +18,11 @@ import MyJobs from "./component/recruiter/MyJobs";
 import JobApplications from "./component/recruiter/JobApplications";
 import AcceptedApplicants from "./component/recruiter/AcceptedApplicants";
 import RecruiterProfile from "./component/recruiter/Profile";
+import RecruiterDashboard from "./component/recruiter/RecruiterDashboard";
 import MessagePopup from "./lib/MessagePopup";
 import isAuth, { userType } from "./lib/isAuth";
+import { server } from "./lib/apiList";
+import { openResume } from "./lib/resumeAccess";
 
 const RoleRoute = ({ roles, children, ...props }) => (
   <Route {...props} render={() => isAuth() && (!roles || roles.includes(userType())) ? children : <Redirect to={isAuth() ? "/home" : "/login"} />} />
@@ -51,6 +54,27 @@ function AppContent() {
   const location = useLocation();
   const authPage = ["/login", "/signup", "/forgot-password"].includes(location.pathname);
 
+  useEffect(() => {
+    const handleResumeLink = (event) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target;
+      const link = target instanceof Element ? target.closest("a[href]") : null;
+      if (!link) return;
+      const url = new URL(link.href, window.location.href);
+      if (url.origin !== new URL(server).origin || !url.pathname.startsWith("/host/resume/")) return;
+      event.preventDefault();
+      openResume(url.pathname).catch((error) => {
+        setPopup({
+          open: true,
+          severity: "error",
+          message: error.response?.data?.message || "Unable to open resume",
+        });
+      });
+    };
+    document.addEventListener("click", handleResumeLink);
+    return () => document.removeEventListener("click", handleResumeLink);
+  }, []);
+
   return (
       <>
         <SetPopupContext.Provider value={setPopup}>
@@ -64,6 +88,7 @@ function AppContent() {
                 <Route exact path="/forgot-password"><ForgotPassword /></Route>
                 <Route exact path="/logout"><Logout /></Route>
                 <RoleRoute exact path="/home"><Home /></RoleRoute>
+                <RoleRoute exact path="/recruiter-dashboard" roles={["recruiter"]}><RecruiterDashboard /></RoleRoute>
                 <RoleRoute exact path="/applications" roles={["applicant"]}><Applications /></RoleRoute>
                 <RoleRoute exact path="/saved-jobs" roles={["applicant"]}><SavedJobs /></RoleRoute>
                 <Route exact path="/profile" render={() => !isAuth() ? <Redirect to="/login" /> : userType() === "recruiter" ? <RecruiterProfile /> : <ApplicantDashboard />} />

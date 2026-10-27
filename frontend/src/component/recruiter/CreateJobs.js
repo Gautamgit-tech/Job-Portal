@@ -1,264 +1,227 @@
-import React, { useContext, useEffect, useState } from "react";
-import {
-  Button,
-  Grid,
-  Typography,
-  Modal,
-  Paper,
-  makeStyles,
-  TextField,
-  MenuItem,
-} from "@material-ui/core";
-import axios from "axios";
-import ChipInput from "material-ui-chip-input";
-
+import React, { useContext, useState } from "react";
+import { Button, CircularProgress, Grid, MenuItem, Paper, TextField, Typography, makeStyles } from "@material-ui/core";
+import { useHistory } from "react-router-dom";
 import { SetPopupContext } from "../../App";
-
-import apiList from "../../lib/apiList";
+import { createRecruiterJob, generateJobDescription } from "../../lib/recruiterApi";
 
 const useStyles = makeStyles((theme) => ({
-  body: {
-    height: "inherit",
-  },
-  popupDialog: {
-    height: "100%",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    // padding: "30px",
-  },
+  page: { width: "100%", maxWidth: 900, padding: theme.spacing(4, 2), margin: "0 auto" },
+  paper: { padding: theme.spacing(3), borderRadius: 16 },
+  title: { marginBottom: theme.spacing(3), fontWeight: 800, color: "#172b4d" },
+  submit: { marginTop: theme.spacing(2), minWidth: 160 },
 }));
 
-const CreateJobs = (props) => {
-  const classes = useStyles();
-  const setPopup = useContext(SetPopupContext);
+const toLocalDateTime = (date) => {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
 
-  const [jobDetails, setJobDetails] = useState({
+const initialDetails = () => {
+  const deadline = new Date();
+  deadline.setDate(deadline.getDate() + 7);
+  return {
     title: "",
-    maxApplicants: 100,
-    maxPositions: 30,
-    deadline: new Date(new Date().getTime() + 10 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .substr(0, 16),
-    skillsets: [],
+    description: "",
+    requirements: "",
+    location: "",
+    workMode: "Remote",
     jobType: "Full Time",
-    duration: 0,
-    salary: 0,
-  });
+    deadline: toLocalDateTime(deadline),
+    salaryMin: "",
+    salaryMax: "",
+    skillsetsText: "",
+    maxApplicants: 100,
+    maxPositions: 1,
+  };
+};
 
-  const handleInput = (key, value) => {
-    setJobDetails({
-      ...jobDetails,
-      [key]: value,
-    });
+const CreateJobs = () => {
+  const classes = useStyles();
+  const history = useHistory();
+  const setPopup = useContext(SetPopupContext);
+  const [details, setDetails] = useState(initialDetails);
+  const [saving, setSaving] = useState(false);
+  const [generatingDescription, setGeneratingDescription] = useState(false);
+  const [jdFile, setJdFile] = useState(null);
+
+  const handleChange = (event) => {
+    setDetails({ ...details, [event.target.name]: event.target.value });
   };
 
-  const handleUpdate = () => {
-    console.log(jobDetails);
-    axios
-      .post(apiList.jobs, jobDetails, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-      })
-      .then((response) => {
-        setPopup({
-          open: true,
-          severity: "success",
-          message: response.data.message,
-        });
-        setJobDetails({
-          title: "",
-          maxApplicants: 100,
-          maxPositions: 30,
-          deadline: new Date(new Date().getTime() + 10 * 24 * 60 * 60 * 1000)
-            .toISOString()
-            .substr(0, 16),
-          skillsets: [],
-          jobType: "Full Time",
-          duration: 0,
-          salary: 0,
-        });
-      })
-      .catch((err) => {
-        setPopup({
-          open: true,
-          severity: "error",
-          message: err.response.data.message,
-        });
-        console.log(err.response);
+  const handleGenerateDescription = async () => {
+    if (!details.title.trim()) {
+      setPopup({ open: true, severity: "error", message: "Enter a job title before generating a description" });
+      return;
+    }
+
+    setGeneratingDescription(true);
+    try {
+      const response = await generateJobDescription({
+        title: details.title.trim(),
+        skills: details.skillsetsText,
+        requirements: details.requirements,
       });
+      if (!response.description) {
+        throw new Error("The AI did not return a job description");
+      }
+      setDetails((current) => ({ ...current, description: response.description }));
+      setPopup({ open: true, severity: "success", message: "AI job description generated" });
+    } catch (error) {
+      setPopup({
+        open: true,
+        severity: "error",
+        message: error.response?.data?.message || error.message || "Unable to generate job description",
+      });
+    } finally {
+      setGeneratingDescription(false);
+    }
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (Number(details.salaryMin) > Number(details.salaryMax)) {
+      setPopup({ open: true, severity: "error", message: "Maximum salary must be at least the minimum salary" });
+      return;
+    }
+
+    const { skillsetsText, ...job } = details;
+    setSaving(true);
+    try {
+      const response = await createRecruiterJob({
+        ...job,
+        skillsets: skillsetsText.split(",").map((skill) => skill.trim()).filter(Boolean),
+        jdFile,
+        salaryMin: Number(job.salaryMin),
+        salaryMax: Number(job.salaryMax),
+        maxApplicants: Number(job.maxApplicants),
+        maxPositions: Number(job.maxPositions),
+      });
+      setPopup({ open: true, severity: "success", message: response.message });
+      history.push("/myjobs");
+    } catch (error) {
+      setPopup({
+        open: true,
+        severity: "error",
+        message: error.response?.data?.message || "Unable to create the job listing",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <>
-      <Grid
-        container
-        item
-        direction="column"
-        alignItems="center"
-        style={{ padding: "30px", minHeight: "93vh", width: "" }}
-      >
-        <Grid item>
-          <Typography variant="h2">Add Job</Typography>
-        </Grid>
-        <Grid item container xs direction="column" justify="center">
-          <Grid item>
-            <Paper
-              style={{
-                padding: "20px",
-                outline: "none",
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "center",
-                alignItems: "center",
-              }}
-            >
-              <Grid
-                container
-                direction="column"
-                alignItems="stretch"
-                spacing={3}
-              >
+    <main className={classes.page}>
+      <Typography variant="h4" className={classes.title}>Post a job</Typography>
+      <Paper elevation={0} className={classes.paper}>
+        <form onSubmit={handleSubmit}>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField name="title" label="Job title" value={details.title} onChange={handleChange} required fullWidth />
+            </Grid>
+            <Grid item xs={12}>
+              <Grid container justify="space-between" alignItems="center" spacing={1}>
                 <Grid item>
-                  <TextField
-                    label="Title"
-                    value={jobDetails.title}
-                    onChange={(event) =>
-                      handleInput("title", event.target.value)
-                    }
-                    variant="outlined"
-                    fullWidth
-                  />
+                  <Typography variant="subtitle1">Job description</Typography>
                 </Grid>
                 <Grid item>
-                  <ChipInput
-                    className={classes.inputBox}
-                    label="Skills"
+                  <Button
+                    type="button"
+                    size="small"
+                    color="primary"
                     variant="outlined"
-                    helperText="Press enter to add skills"
-                    value={jobDetails.skillsets}
-                    onAdd={(chip) =>
-                      setJobDetails({
-                        ...jobDetails,
-                        skillsets: [...jobDetails.skillsets, chip],
-                      })
-                    }
-                    onDelete={(chip, index) => {
-                      let skillsets = jobDetails.skillsets;
-                      skillsets.splice(index, 1);
-                      setJobDetails({
-                        ...jobDetails,
-                        skillsets: skillsets,
-                      });
-                    }}
-                    fullWidth
-                  />
-                </Grid>
-                <Grid item>
-                  <TextField
-                    select
-                    label="Job Type"
-                    variant="outlined"
-                    value={jobDetails.jobType}
-                    onChange={(event) => {
-                      handleInput("jobType", event.target.value);
-                    }}
-                    fullWidth
+                    onClick={handleGenerateDescription}
+                    disabled={generatingDescription}
                   >
-                    <MenuItem value="Full Time">Full Time</MenuItem>
-                    <MenuItem value="Part Time">Part Time</MenuItem>
-                    <MenuItem value="Work From Home">Work From Home</MenuItem>
-                  </TextField>
+                    {generatingDescription
+                      ? <><CircularProgress size={16} style={{ marginRight: 8 }} />Generating...</>
+                      : "✨ Generate with AI"}
+                  </Button>
                 </Grid>
-                <Grid item>
+                <Grid item xs={12}>
                   <TextField
-                    select
-                    label="Duration"
-                    variant="outlined"
-                    value={jobDetails.duration}
-                    onChange={(event) => {
-                      handleInput("duration", event.target.value);
-                    }}
-                    fullWidth
-                  >
-                    <MenuItem value={0}>Flexible</MenuItem>
-                    <MenuItem value={1}>1 Month</MenuItem>
-                    <MenuItem value={2}>2 Months</MenuItem>
-                    <MenuItem value={3}>3 Months</MenuItem>
-                    <MenuItem value={4}>4 Months</MenuItem>
-                    <MenuItem value={5}>5 Months</MenuItem>
-                    <MenuItem value={6}>6 Months</MenuItem>
-                  </TextField>
-                </Grid>
-                <Grid item>
-                  <TextField
-                    label="Salary"
-                    type="number"
-                    variant="outlined"
-                    value={jobDetails.salary}
-                    onChange={(event) => {
-                      handleInput("salary", event.target.value);
-                    }}
-                    InputProps={{ inputProps: { min: 0 } }}
-                    fullWidth
-                  />
-                </Grid>
-                <Grid item>
-                  <TextField
-                    label="Application Deadline"
-                    type="datetime-local"
-                    value={jobDetails.deadline}
-                    onChange={(event) => {
-                      handleInput("deadline", event.target.value);
-                    }}
-                    InputLabelProps={{
-                      shrink: true,
-                    }}
-                    variant="outlined"
-                    fullWidth
-                  />
-                </Grid>
-                <Grid item>
-                  <TextField
-                    label="Maximum Number Of Applicants"
-                    type="number"
-                    variant="outlined"
-                    value={jobDetails.maxApplicants}
-                    onChange={(event) => {
-                      handleInput("maxApplicants", event.target.value);
-                    }}
-                    InputProps={{ inputProps: { min: 1 } }}
-                    fullWidth
-                  />
-                </Grid>
-                <Grid item>
-                  <TextField
-                    label="Positions Available"
-                    type="number"
-                    variant="outlined"
-                    value={jobDetails.maxPositions}
-                    onChange={(event) => {
-                      handleInput("maxPositions", event.target.value);
-                    }}
-                    InputProps={{ inputProps: { min: 1 } }}
+                    name="description"
+                    label="Job description"
+                    value={details.description}
+                    onChange={handleChange}
+                    required
+                    multiline
+                    minRows={4}
                     fullWidth
                   />
                 </Grid>
               </Grid>
-              <Button
-                variant="contained"
-                color="primary"
-                style={{ padding: "10px 50px", marginTop: "30px" }}
-                onClick={() => handleUpdate()}
-              >
-                Create Job
-              </Button>
-            </Paper>
+            </Grid>
+            <Grid item xs={12}>
+              <TextField name="requirements" label="Requirements" value={details.requirements} onChange={handleChange} required multiline minRows={3} helperText="List experience, qualifications, and responsibilities." fullWidth />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField name="location" label="Location" value={details.location} onChange={handleChange} required fullWidth />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField name="workMode" label="Work arrangement" value={details.workMode} onChange={handleChange} select fullWidth>
+                {["Remote", "On-site", "Hybrid"].map((mode) => <MenuItem key={mode} value={mode}>{mode}</MenuItem>)}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField name="jobType" label="Employment type" value={details.jobType} onChange={handleChange} select fullWidth>
+                {["Full Time", "Part Time", "Contract", "Internship", "Work From Home"].map((type) => <MenuItem key={type} value={type}>{type}</MenuItem>)}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField name="deadline" label="Application deadline" type="datetime-local" value={details.deadline} onChange={handleChange} InputLabelProps={{ shrink: true }} required fullWidth />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField name="salaryMin" label="Minimum salary" type="number" value={details.salaryMin} onChange={handleChange} inputProps={{ min: 0 }} required fullWidth />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField name="salaryMax" label="Maximum salary" type="number" value={details.salaryMax} onChange={handleChange} inputProps={{ min: 0 }} required fullWidth />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField name="skillsetsText" label="Skills" placeholder="React, Node.js, MongoDB" value={details.skillsetsText} onChange={handleChange} helperText="Separate skills with commas." fullWidth />
+            </Grid>
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" gutterBottom>Job description PDF (optional)</Typography>
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={(event) => {
+                  const file = event.target.files[0];
+                  if (!file) {
+                    setJdFile(null);
+                    return;
+                  }
+                  if (file.type !== "application/pdf" || !file.name.toLowerCase().endsWith(".pdf")) {
+                    event.target.value = "";
+                    setJdFile(null);
+                    setPopup({ open: true, severity: "error", message: "Choose a PDF file for the job description" });
+                    return;
+                  }
+                  if (file.size > 10 * 1024 * 1024) {
+                    event.target.value = "";
+                    setJdFile(null);
+                    setPopup({ open: true, severity: "error", message: "The PDF must be 10 MB or smaller" });
+                    return;
+                  }
+                  setJdFile(file);
+                }}
+              />
+              <Typography variant="caption" color="textSecondary" display="block">
+                {jdFile ? jdFile.name : "PDF only, up to 10 MB"}
+              </Typography>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField name="maxApplicants" label="Applicant limit" type="number" value={details.maxApplicants} onChange={handleChange} inputProps={{ min: 1, step: 1 }} required fullWidth />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField name="maxPositions" label="Available positions" type="number" value={details.maxPositions} onChange={handleChange} inputProps={{ min: 1, step: 1 }} required fullWidth />
+            </Grid>
           </Grid>
-        </Grid>
-      </Grid>
-    </>
+          <Button type="submit" variant="contained" color="primary" className={classes.submit} disabled={saving}>
+            {saving ? "Publishing..." : "Publish job"}
+          </Button>
+        </form>
+      </Paper>
+    </main>
   );
 };
 

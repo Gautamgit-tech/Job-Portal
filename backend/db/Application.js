@@ -1,5 +1,53 @@
 const mongoose = require("mongoose");
 
+const assessmentDetailsSchema = new mongoose.Schema(
+  {
+    link: { type: String, trim: true, maxlength: 2048 },
+    deadline: { type: Date },
+    score: { type: Number, min: 0, max: 100 },
+    status: {
+      type: String,
+      enum: ["Not sent", "Pending", "Completed", "Expired"],
+      default: "Not sent",
+    },
+  },
+  { _id: false }
+);
+
+const interviewRoundSchema = new mongoose.Schema(
+  {
+    roundNumber: { type: Number, required: true, min: 1 },
+    roundName: { type: String, required: true, trim: true, maxlength: 120 },
+    date: { type: Date, required: true },
+    interviewType: {
+      type: String,
+      enum: ["Online", "On-site", "Phone"],
+      default: "Online",
+    },
+    meetingLink: { type: String, trim: true, maxlength: 2048 },
+    interviewer: { type: String, trim: true, maxlength: 160 },
+    feedback: { type: String, trim: true, maxlength: 4000 },
+    status: {
+      type: String,
+      enum: ["Scheduled", "Completed", "Cancelled"],
+      default: "Scheduled",
+    },
+  },
+  { timestamps: true }
+);
+
+const aiMatchSchema = new mongoose.Schema(
+  {
+    score: { type: Number, min: 0, max: 100, required: true },
+    summary: { type: String, trim: true, maxlength: 1200, required: true },
+    matchedSkills: [{ type: String, trim: true, maxlength: 120 }],
+    missingSkills: [{ type: String, trim: true, maxlength: 120 }],
+    analyzedAt: { type: Date, required: true },
+    model: { type: String, trim: true, maxlength: 80, required: true },
+  },
+  { _id: false }
+);
+
 let schema = new mongoose.Schema(
   {
     userId: {
@@ -33,6 +81,31 @@ let schema = new mongoose.Schema(
       ],
       default: "applied",
       required: true,
+    },
+    hiringStage: {
+      type: String,
+      trim: true,
+      maxlength: 80,
+    },
+    hiringStageHistory: [
+      {
+        previousStage: { type: String, trim: true, maxlength: 80 },
+        newStage: { type: String, trim: true, maxlength: 80, required: true },
+        changedBy: { type: mongoose.Schema.Types.ObjectId, required: true },
+        changedAt: { type: Date, default: Date.now },
+      },
+    ],
+    assessmentDetails: {
+      type: assessmentDetailsSchema,
+      default: () => ({ status: "Not sent" }),
+    },
+    interviewRounds: {
+      type: [interviewRoundSchema],
+      default: [],
+    },
+    aiMatch: {
+      type: aiMatchSchema,
+      default: undefined,
     },
     dateOfApplication: {
       type: Date,

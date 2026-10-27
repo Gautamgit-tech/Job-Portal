@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { DEFAULT_HIRING_STAGES } = require("../lib/hiringStages");
 
 let schema = new mongoose.Schema(
   {
@@ -9,6 +10,21 @@ let schema = new mongoose.Schema(
     title: {
       type: String,
       required: true,
+    },
+    description: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    jdFileUrl: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    requirements: {
+      type: String,
+      trim: true,
+      default: "",
     },
     location: {
       type: String,
@@ -108,6 +124,15 @@ let schema = new mongoose.Schema(
       ],
     },
     skillsets: [String],
+    hiringStages: {
+      type: [{
+        type: String,
+        trim: true,
+        minlength: 1,
+        maxlength: 80,
+      }],
+      default: () => DEFAULT_HIRING_STAGES.slice(),
+    },
     jobType: {
       type: String,
       required: true,
@@ -136,6 +161,26 @@ let schema = new mongoose.Schema(
           msg: "Salary should be positive",
         },
       ],
+    },
+    salaryMin: {
+      type: Number,
+      min: 0,
+    },
+    salaryMax: {
+      type: Number,
+      min: 0,
+      validate: {
+        validator: function (value) {
+          return value === undefined || this.salaryMin === undefined || value >= this.salaryMin;
+        },
+        msg: "Maximum salary must be greater than or equal to minimum salary",
+      },
+    },
+    status: {
+      type: String,
+      enum: ["active", "closed"],
+      default: "active",
+      required: true,
     },
     rating: {
       type: Number,

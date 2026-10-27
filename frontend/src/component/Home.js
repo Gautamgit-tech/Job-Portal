@@ -10,7 +10,7 @@ import BookmarkBorderIcon from "@material-ui/icons/BookmarkBorder";
 import BookmarkIcon from "@material-ui/icons/Bookmark";
 
 import { SetPopupContext } from "../App";
-import apiList from "../lib/apiList";
+import apiList, { server } from "../lib/apiList";
 import { userType } from "../lib/isAuth";
 
 const useStyles = makeStyles((theme) => ({
@@ -76,6 +76,13 @@ const JobTile = ({ job }) => {
         <div className={classes.detail}><ScheduleIcon className={classes.icon} /> {formatSalary(job.salary)} · {job.duration ? `${job.duration} months` : "Flexible duration"}</div>
         <Typography variant="body2" color="textSecondary">Apply by {new Date(job.deadline).toLocaleDateString()}</Typography>
         <div className={classes.chips}>{(job.skillsets || []).map((skill) => <Chip key={skill} label={skill} size="small" variant="outlined" />)}</div>
+        {job.jdFileUrl && (
+          <Typography variant="body2" style={{ marginBottom: 12 }}>
+            <a href={`${server}${job.jdFileUrl}`} target="_blank" rel="noopener noreferrer">
+              View job description PDF
+            </a>
+          </Typography>
+        )}
       </div>
       <Button variant="contained" color="primary" fullWidth disabled={!canApply} onClick={() => setOpen(true)}>{canApply ? "Apply now" : "Applicant access required"}</Button>
       <Modal open={open} onClose={() => setOpen(false)} className={classes.modal}>

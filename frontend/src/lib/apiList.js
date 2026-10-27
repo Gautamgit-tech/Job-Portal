@@ -11,6 +11,7 @@ const apiList = {
   resetPassword: `${server}/auth/reset-password`,
   uploadResume: `${server}/upload/resume`,
   uploadProfileImage: `${server}/upload/profile`,
+  uploadCompanyLogo: `${server}/upload/company-logo`,
   jobs: `${server}/api/jobs`,
   savedJobs: `${server}/api/saved-jobs`,
   savedJobStatus: (jobId) => `${server}/api/jobs/${jobId}/saved`,
@@ -18,7 +19,9 @@ const apiList = {
   rating: `${server}/api/rating`,
   user: `${server}/api/user`,
   applicantDashboard: `${server}/api/applicant-dashboard`,
+  recruiterDashboard: `${server}/api/recruiter-dashboard`,
   applicants: `${server}/api/applicants`,
+  aiGenerateJobDescription: `${server}/api/ai/generate-jd`,
 };
 
 export default apiList;

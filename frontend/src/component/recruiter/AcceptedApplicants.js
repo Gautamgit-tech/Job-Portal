@@ -27,6 +27,7 @@ import ArrowDownwardIcon from "@material-ui/icons/ArrowDownward";
 import { SetPopupContext } from "../../App";
 
 import apiList, { server } from "../../lib/apiList";
+import { openResume } from "../../lib/resumeAccess";
 
 const useStyles = makeStyles((theme) => ({
   body: {
@@ -462,17 +463,7 @@ const ApplicationTile = (props) => {
       application.jobApplicant.resume &&
       application.jobApplicant.resume !== ""
     ) {
-      const address = `${server}${application.jobApplicant.resume}`;
-      console.log(address);
-      axios(address, {
-        method: "GET",
-        responseType: "blob",
-      })
-        .then((response) => {
-          const file = new Blob([response.data], { type: "application/pdf" });
-          const fileURL = URL.createObjectURL(file);
-          window.open(fileURL);
-        })
+      openResume(application.jobApplicant.resume)
         .catch((error) => {
           console.log(error);
           setPopup({

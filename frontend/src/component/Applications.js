@@ -7,6 +7,7 @@ import axios from "axios";
 
 import { SetPopupContext } from "../App";
 import apiList from "../lib/apiList";
+import { DEFAULT_HIRING_STAGES, hiringStagesForJob } from "../lib/hiringStages";
 
 const useStyles = makeStyles((theme) => ({
   page: { width: "100%", maxWidth: 1180, padding: theme.spacing(3, 2, 6), margin: "0 auto", boxSizing: "border-box" },
@@ -22,25 +23,18 @@ const useStyles = makeStyles((theme) => ({
   empty: { width: "100%", padding: theme.spacing(6), textAlign: "center", color: "#52606d", borderRadius: 14 },
 }));
 
-const colorSet = {
-  applied: "#3454D1",
-  under_review: "#52606d",
-  shortlisted: "#DC851F",
-  assessment: "#7C4DFF",
-  interview: "#00897B",
-  offer: "#EF6C00",
-  hired: "#09BC8A",
-  accepted: "#09BC8A",
-  rejected: "#D1345B",
-  withdrawn: "#8a94a6",
-  deleted: "#B49A67",
-  cancelled: "#FF8484",
-  finished: "#4EA5D9",
-};
-
-const pipeline = ["applied", "under_review", "shortlisted", "assessment", "interview", "offer", "hired"];
-const pipelineLabels = ["Applied", "Under review", "Shortlisted", "Assessment", "Interview", "Offer", "Hired"];
 const statusLabel = { under_review: "Under review", accepted: "Hired", withdrawn: "Withdrawn", cancelled: "Cancelled" };
+const hiringStageColors = {
+  Applied: "#2563eb",
+  Shortlisted: "#0e7490",
+  "PPT Discussion": "#15803d",
+  Assessment: "#7c3aed",
+  PI: "#c2410c",
+  PI2: "#a16207",
+  "HR Interview": "#4338ca",
+  Hired: "#059669",
+  Rejected: "#e11d48",
+};
 
 const ApplicationTile = ({ application }) => {
   const classes = useStyles();
@@ -51,7 +45,30 @@ const ApplicationTile = ({ application }) => {
   const appliedOn = new Date(application.dateOfApplication);
   const joinedOn = new Date(application.dateOfJoining);
   const canRate = application.status === "accepted" || application.status === "finished";
-  const terminal = ["rejected", "withdrawn", "cancelled", "finished", "hired", "accepted"].includes(application.status);
+  const stages = hiringStagesForJob(application.job || { hiringStages: DEFAULT_HIRING_STAGES });
+  const legacyStage = application.status === "shortlisted"
+    ? "Shortlisted"
+    : application.status === "assessment"
+      ? "Assessment"
+      : application.status === "interview"
+        ? "PI"
+        : application.status === "offer"
+          ? "HR Interview"
+          : application.status === "accepted" || application.status === "hired"
+            ? "Hired"
+            : application.status === "rejected"
+              ? "Rejected"
+              : "Applied";
+  const storedStage = application.hiringStage || legacyStage;
+  const normalizedStoredStage = storedStage === "Interviewing"
+    ? "PI"
+    : storedStage === "Selected"
+      ? "Hired"
+      : storedStage;
+  const hiringStage = stages.includes(normalizedStoredStage) ? normalizedStoredStage : "Applied";
+  const processStages = stages.filter((stage) => stage !== "Rejected");
+  const terminal = ["rejected", "withdrawn", "cancelled", "finished", "hired", "accepted"].includes(application.status) ||
+    ["Rejected", "Hired"].includes(hiringStage);
 
   const fetchRating = () => {
     axios
@@ -82,20 +99,85 @@ const ApplicationTile = ({ application }) => {
           <Typography variant="h6">{application.job.title}</Typography>
           <Typography variant="body2" color="textSecondary">Posted by {application.recruiter.name}</Typography>
         </div>
-        <span className={classes.status} style={{ background: colorSet[application.status] || "#52606d" }}>{statusLabel[application.status] || application.status.replace("_", " ")}</span>
+        <span className={classes.status} style={{ background: hiringStageColors[hiringStage] || "#52606d" }}>{hiringStage}</span>
       </div>
 
       <div className={classes.chips}>
         {application.job.skillsets.map((skill) => <Chip key={skill} label={skill} size="small" variant="outlined" />)}
       </div>
 
-      {application.status !== "rejected" && application.status !== "cancelled" && (
-        <Stepper activeStep={Math.max(pipeline.indexOf(application.status === "accepted" ? "hired" : application.status), 0)} alternativeLabel style={{ padding: "16px 0 8px", overflowX: "auto" }}>
-          {pipelineLabels.map((label) => <Step key={label}><StepLabel>{label}</StepLabel></Step>)}
+      {hiringStage !== "Rejected" && (
+        <Stepper
+          activeStep={processStages.indexOf(hiringStage)}
+          alternativeLabel
+          style={{ padding: "16px 0 8px", overflowX: "auto" }}
+        >
+          {processStages.map((label) => <Step key={label}><StepLabel>{label}</StepLabel></Step>)}
         </Stepper>
+      )}
+      {application.assessmentDetails?.link && (
+        <Paper elevation={0} style={{ padding: 16, marginTop: 16, borderRadius: 12, background: "#f5f3ff" }}>
+          <Typography variant="subtitle1" style={{ fontWeight: 700 }}>Assessment assigned</Typography>
+          {application.assessmentDetails.deadline && (
+            <Typography variant="body2" color="textSecondary">
+              Complete by {new Date(application.assessmentDetails.deadline).toLocaleString()}
+            </Typography>
+          )}
+          <Button
+            variant="contained"
+            color="primary"
+            href={application.assessmentDetails.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ marginTop: 10 }}
+          >
+            Open assessment
+          </Button>
+        </Paper>
+      )}
+      {(application.interviewRounds || []).length > 0 && (
+        <Paper elevation={0} style={{ padding: 16, marginTop: 16, borderRadius: 12, background: "#fffbeb" }}>
+          <Typography variant="subtitle1" style={{ fontWeight: 700 }}>Interview schedule</Typography>
+          {application.interviewRounds.map((round) => (
+            <div key={round._id || round.roundNumber} style={{ marginTop: 10 }}>
+              <Typography variant="body2" style={{ fontWeight: 600 }}>
+                Round {round.roundNumber}: {round.roundName} · {round.interviewType || "Online"}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                {round.date ? new Date(round.date).toLocaleString() : "Time to be confirmed"}
+                {round.interviewer ? ` · Interviewer: ${round.interviewer}` : ""}
+              </Typography>
+              {round.meetingLink && (
+                <Button
+                  size="small"
+                  color="primary"
+                  href={round.meetingLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Join meeting
+                </Button>
+              )}
+            </div>
+          ))}
+        </Paper>
       )}
       <Typography variant="caption" color="textSecondary">Last updated {new Date(application.updatedAt || application.dateOfApplication).toLocaleDateString()}</Typography>
       {application.statusHistory?.length > 0 && <div style={{ marginTop: 12 }}>{application.statusHistory.map((event, index) => <Typography variant="caption" display="block" key={`${event.changedAt}-${index}`} color="textSecondary">{new Date(event.changedAt).toLocaleDateString()} · {statusLabel[event.newStatus] || event.newStatus.replace("_", " ")}{event.recruiterNote ? ` · ${event.recruiterNote}` : ""}</Typography>)}</div>}
+      {application.hiringStageHistory?.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          {application.hiringStageHistory.map((event, index) => (
+            <Typography
+              variant="caption"
+              display="block"
+              key={`${event.changedAt}-${index}`}
+              color="textSecondary"
+            >
+              {new Date(event.changedAt).toLocaleDateString()} · Moved to {event.newStage}
+            </Typography>
+          ))}
+        </div>
+      )}
 
       <div className={classes.detail}><ScheduleIcon className={classes.icon} /> ₹{application.job.salary} / month · {application.job.duration !== 0 ? `${application.job.duration} months` : "Flexible duration"}</div>
       <div className={classes.detail}><EventIcon className={classes.icon} /> Applied on {appliedOn.toLocaleDateString()}{canRate ? ` · Joined ${joinedOn.toLocaleDateString()}` : ""}</div>

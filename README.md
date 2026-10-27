@@ -7,11 +7,14 @@ The application uses **JWT-based authentication** to protect REST APIs and maint
 ## Features
 
 ### Recruiter
-- Create, update, and delete job postings
+- View hiring metrics and manage active or closed job postings
+- Create, edit, close, reopen, and delete job postings
 - View and manage job applications
-- Shortlist, accept, or reject applications
-- View applicant resumes
-- Edit profile
+- Move candidates through the shared Applied, Shortlisted, PPT Discussion, Assessment, PI, PI2, HR Interview, Hired, and Rejected pipeline
+- Assign online assessments and schedule interview rounds for candidates
+- Attach an optional PDF job description (up to 10 MB) to a job posting
+- View applicant profiles and access resumes through authenticated links
+- Maintain a company profile with branding, industry, website, location, size, and LinkedIn details
 
 ### Applicant
 - Browse available jobs
@@ -36,6 +39,7 @@ The application uses **JWT-based authentication** to protect REST APIs and maint
 Job-Portal/
 ├── backend/
 │   └── public/
+│       ├── job-description/
 │       ├── profile/
 │       └── resume/
 ├── frontend/
@@ -48,7 +52,7 @@ Job-Portal/
 
 Make sure the following are installed on your machine:
 
-- Node.js
+- Node.js 20 or newer
 - MongoDB
 - npm
 
@@ -71,6 +75,8 @@ Install the backend dependencies:
 ```bash
 npm install
 ```
+
+For the recruiter AI tools, copy `.env.example` to `.env` from the backend directory and set `GEMINI_API_KEY` to a key from Google AI Studio. Keep this key in the backend environment; do not put it in frontend variables. The AI job-description generator sends the job title and skills to Gemini. Resume matching sends a candidate's extracted resume text only after a recruiter selects **Analyze resume match with AI**.
 
 Start the Express server:
 

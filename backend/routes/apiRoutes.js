@@ -1,5 +1,10 @@
 const express = require("express");
 const mongoose = require("mongoose");
+const fs = require("fs");
+const path = require("path");
+const multer = require("multer");
+const { v4: uuidv4 } = require("uuid");
+const { PDFParse } = require("pdf-parse");
 const jwtAuth = require("../lib/jwtAuth");
 
 const User = require("../db/User");
@@ -9,6 +14,23 @@ const Job = require("../db/Job");
 const Application = require("../db/Application");
 const Rating = require("../db/Rating");
 const SavedJob = require("../db/SavedJob");
+const {
+  DEFAULT_HIRING_STAGES,
+} = require("../lib/hiringStages");
+const { generateJobDescription, matchCandidate } = require("../lib/aiService");
+
+const jdUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, callback) => {
+    if (path.extname(file.originalname).toLowerCase() !== ".pdf" ||
+      !["application/pdf", "application/octet-stream"].includes(file.mimetype)) {
+      callback(new Error("Job description attachment must be a PDF file"));
+      return;
+    }
+    callback(null, true);
+  },
+});
 
 const allowedStatusTransitions = {
   applied: ["under_review", "shortlisted", "rejected", "cancelled", "withdrawn"],
@@ -26,47 +48,224 @@ const allowedStatusTransitions = {
   finished: [],
 };
 
+const hiringStageForLegacyStatus = {
+  applied: "Applied",
+  under_review: "Applied",
+  shortlisted: "Shortlisted",
+  assessment: "Assessment",
+  interview: "PI",
+  offer: "HR Interview",
+  hired: "Hired",
+  accepted: "Hired",
+  rejected: "Rejected",
+};
+
+const isHttpUrl = (value) => {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && Boolean(url.hostname);
+  } catch (error) {
+    return false;
+  }
+};
+
 const router = express.Router();
 
-// To add new job
-router.post("/jobs", jwtAuth, (req, res) => {
-  const user = req.user;
-
-  if (user.type != "recruiter") {
-    res.status(401).json({
-      message: "You don't have permissions to add jobs",
-    });
-    return;
+router.post("/ai/generate-jd", jwtAuth, async (req, res) => {
+  if (req.user.type !== "recruiter") {
+    return res.status(403).json({ message: "Recruiter access required" });
+  }
+  const { title, skills, requirements } = req.body || {};
+  if (typeof title !== "string" || !title.trim() || title.trim().length > 160) {
+    return res.status(400).json({ message: "A job title of 1 to 160 characters is required" });
+  }
+  if (skills !== undefined && typeof skills !== "string" && !Array.isArray(skills)) {
+    return res.status(400).json({ message: "Skills must be text or a list of skills" });
+  }
+  if (requirements !== undefined && (typeof requirements !== "string" || requirements.length > 8000)) {
+    return res.status(400).json({ message: "Requirements must be text of 8,000 characters or fewer" });
   }
 
-  const data = req.body;
-
-  let job = new Job({
-    userId: user._id,
-    title: data.title,
-    maxApplicants: data.maxApplicants,
-    maxPositions: data.maxPositions,
-    dateOfPosting: data.dateOfPosting,
-    deadline: data.deadline,
-    skillsets: data.skillsets,
-    location: data.location,
-    workMode: data.workMode,
-    experienceLevel: data.experienceLevel,
-    category: data.category,
-    jobType: data.jobType,
-    duration: data.duration,
-    salary: data.salary,
-    rating: data.rating,
-  });
-
-  job
-    .save()
-    .then(() => {
-      res.json({ message: "Job added successfully to the database" });
-    })
-    .catch((err) => {
-      res.status(400).json(err);
+  try {
+    const skillText = Array.isArray(skills) ? skills.join(", ") : (skills || "");
+    if (skillText.length > 2000) {
+      return res.status(400).json({ message: "Skills must be 2,000 characters or fewer" });
+    }
+    const description = await generateJobDescription({
+      title: title.trim(),
+      skills: skillText.trim(),
+      requirements: (requirements || "").trim(),
     });
+    return res.json({ description });
+  } catch (error) {
+    return res.status(error.statusCode || 502).json({ message: error.message || "Unable to generate job description" });
+  }
+});
+
+router.post("/applications/:id/ai-match", jwtAuth, async (req, res) => {
+  if (req.user.type !== "recruiter") {
+    return res.status(403).json({ message: "Recruiter access required" });
+  }
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ message: "Invalid application id" });
+  }
+
+  try {
+    const application = await Application.findOne({
+      _id: req.params.id,
+      recruiterId: req.user._id,
+    });
+    if (!application) return res.status(404).json({ message: "Application not found" });
+
+    const job = await Job.findOne({
+      _id: application.jobId,
+      userId: req.user._id,
+    }).select("title description requirements skillsets");
+    if (!job) return res.status(403).json({ message: "You do not own this job" });
+
+    const applicant = await JobApplicant.findOne({ userId: application.userId }).select("skills resume");
+    if (!applicant) return res.status(404).json({ message: "Candidate profile not found" });
+    if (!applicant.resume) return res.status(400).json({ message: "This candidate has not uploaded a resume" });
+
+    const resumeFilename = path.basename(applicant.resume);
+    if (
+      !applicant.resume.startsWith("/host/resume/") ||
+      resumeFilename !== applicant.resume.slice("/host/resume/".length) ||
+      !resumeFilename.toLowerCase().endsWith(".pdf")
+    ) {
+      return res.status(400).json({ message: "Candidate resume path is invalid" });
+    }
+
+    const resumePath = path.join(__dirname, "../public/resume", resumeFilename);
+    let resumeBuffer;
+    try {
+      resumeBuffer = await fs.promises.readFile(resumePath);
+    } catch (error) {
+      if (error.code === "ENOENT") return res.status(404).json({ message: "Candidate resume file was not found" });
+      throw error;
+    }
+
+    let parser;
+    let resumeText;
+    try {
+      parser = new PDFParse({ data: resumeBuffer });
+      const parsed = await parser.getText();
+      resumeText = parsed.text;
+    } catch (error) {
+      return res.status(422).json({ message: "Unable to extract readable text from this PDF resume" });
+    } finally {
+      if (parser) await parser.destroy();
+    }
+    if (!resumeText || !resumeText.trim()) {
+      return res.status(422).json({ message: "This PDF resume contains no extractable text" });
+    }
+
+    const aiMatch = await matchCandidate({
+      jobTitle: job.title,
+      jobDescription: job.description,
+      requirements: job.requirements,
+      requiredSkills: job.skillsets,
+      candidateSkills: applicant.skills,
+      resumeText,
+    });
+    application.aiMatch = aiMatch;
+    await application.save();
+
+    return res.json({
+      message: "AI resume match saved",
+      aiMatch: application.aiMatch,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Unable to analyze candidate resume",
+    });
+  }
+});
+
+// To add new job
+router.post("/jobs", jwtAuth, (req, res, next) => {
+  jdUpload.single("jdFile")(req, res, (error) => {
+    if (!error) {
+      next();
+      return;
+    }
+    const message = error.code === "LIMIT_FILE_SIZE"
+      ? "Job description PDF must be 10 MB or smaller"
+      : error.message || "Unable to process job description PDF";
+    return res.status(400).json({ message });
+  });
+}, async (req, res) => {
+  const user = req.user;
+  if (user.type !== "recruiter") {
+    return res.status(403).json({ message: "Recruiter access required" });
+  }
+
+  let savedPdfPath;
+  try {
+    const data = req.body;
+    if (req.file && req.file.buffer.subarray(0, 5).toString("ascii") !== "%PDF-") {
+      return res.status(400).json({ message: "The uploaded file is not a valid PDF" });
+    }
+    const parseList = (value) => {
+      if (Array.isArray(value)) return value;
+      if (typeof value !== "string" || !value.trim()) return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        return value.split(",").map((item) => item.trim()).filter(Boolean);
+      }
+    };
+    const salaryMin = data.salaryMin === "" ? undefined : Number(data.salaryMin);
+    const salaryMax = data.salaryMax === "" ? undefined : Number(data.salaryMax);
+    let jdFileUrl = "";
+    if (req.file) {
+      const directory = path.join(__dirname, "../public/job-description");
+      await fs.promises.mkdir(directory, { recursive: true });
+      const filename = `${uuidv4()}.pdf`;
+      savedPdfPath = path.join(directory, filename);
+      await fs.promises.writeFile(savedPdfPath, req.file.buffer, { flag: "wx" });
+      jdFileUrl = `/host/job-description/${filename}`;
+    }
+    const job = new Job({
+      userId: user._id,
+      title: data.title,
+      description: data.description,
+      requirements: data.requirements,
+      maxApplicants: data.maxApplicants,
+      maxPositions: data.maxPositions,
+      deadline: data.deadline,
+      skillsets: parseList(data.skillsets),
+      hiringStages: DEFAULT_HIRING_STAGES,
+      jdFileUrl,
+      location: data.location,
+      workMode: data.workMode,
+      experienceLevel: data.experienceLevel,
+      category: data.category,
+      jobType: data.jobType,
+      duration: data.duration,
+      salaryMin,
+      salaryMax,
+      salary: salaryMin !== undefined && salaryMax !== undefined
+        ? Math.round((salaryMin + salaryMax) / 2)
+        : data.salary,
+    });
+
+    await job.save();
+    return res.status(201).json({ message: "Job added successfully", job });
+  } catch (err) {
+    if (savedPdfPath) {
+      try {
+        await fs.promises.unlink(savedPdfPath);
+      } catch (cleanupError) {
+        if (cleanupError.code !== "ENOENT") console.error("Failed to remove an unassociated job description PDF", cleanupError);
+      }
+    }
+    return res.status(err.name === "ValidationError" ? 400 : 500).json({
+      message: err.name === "ValidationError" ? err.message : "Unable to create the job listing",
+    });
+  }
 });
 
 // to get all the jobs [pagination] [for recruiter personal and for everyone]
@@ -89,6 +288,18 @@ router.get("/jobs", jwtAuth.optional, (req, res) => {
       ...findParams,
       userId: user._id,
     };
+  }
+  if (!(user && user.type === "recruiter" && req.query.myjobs)) {
+    findParams.status = { $ne: "closed" };
+    findParams.$and = [
+      {
+        $or: [
+          { deadline: { $exists: false } },
+          { deadline: null },
+          { deadline: { $gt: new Date() } },
+        ],
+      },
+    ];
   }
 
   if (req.query.q) {
@@ -138,35 +349,15 @@ router.get("/jobs", jwtAuth.optional, (req, res) => {
   }
 
   if (req.query.salaryMin && req.query.salaryMax) {
-    findParams = {
-      ...findParams,
-      $and: [
-        {
-          salary: {
-            $gte: parseInt(req.query.salaryMin),
-          },
-        },
-        {
-          salary: {
-            $lte: parseInt(req.query.salaryMax),
-          },
-        },
-      ],
-    };
+    findParams.$and = [
+      ...(findParams.$and || []),
+      { salary: { $gte: parseInt(req.query.salaryMin, 10) } },
+      { salary: { $lte: parseInt(req.query.salaryMax, 10) } },
+    ];
   } else if (req.query.salaryMin) {
-    findParams = {
-      ...findParams,
-      salary: {
-        $gte: parseInt(req.query.salaryMin),
-      },
-    };
+    findParams.salary = { $gte: parseInt(req.query.salaryMin, 10) };
   } else if (req.query.salaryMax) {
-    findParams = {
-      ...findParams,
-      salary: {
-        $lte: parseInt(req.query.salaryMax),
-      },
-    };
+    findParams.salary = { $lte: parseInt(req.query.salaryMax, 10) };
   }
 
   if (req.query.duration) {
@@ -275,6 +466,32 @@ router.get("/jobs", jwtAuth.optional, (req, res) => {
     });
 });
 
+router.get("/recruiter-dashboard", jwtAuth, async (req, res) => {
+  if (req.user.type !== "recruiter") {
+    return res.status(403).json({ message: "Recruiter access required" });
+  }
+
+  try {
+    const [jobs, totalApplicants] = await Promise.all([
+      Job.find({ userId: req.user._id }).select("status deadline").lean(),
+      Application.countDocuments({ recruiterId: req.user._id }),
+    ]);
+    const now = new Date();
+    const activeJobs = jobs.filter((job) =>
+      job.status !== "closed" && (!job.deadline || new Date(job.deadline) > now)
+    ).length;
+
+    return res.json({
+      totalJobs: jobs.length,
+      totalApplicants,
+      activeJobs,
+      closedJobs: jobs.length - activeJobs,
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Unable to load recruiter dashboard" });
+  }
+});
+
 // to get info about a particular job
 router.get("/jobs/:id", jwtAuth, (req, res) => {
   Job.findOne({ _id: req.params.id })
@@ -293,68 +510,58 @@ router.get("/jobs/:id", jwtAuth, (req, res) => {
 });
 
 // to update info of a particular job
-router.put("/jobs/:id", jwtAuth, (req, res) => {
+router.put("/jobs/:id", jwtAuth, async (req, res) => {
   const user = req.user;
-  if (user.type != "recruiter") {
-    res.status(401).json({
-      message: "You don't have permissions to change the job details",
+  if (user.type !== "recruiter") {
+    return res.status(403).json({
+      message: "Recruiter access required",
     });
-    return;
   }
-  Job.findOne({
-    _id: req.params.id,
-    userId: user.id,
-  })
-    .then((job) => {
-      if (job == null) {
-        res.status(404).json({
-          message: "Job does not exist",
-        });
-        return;
-      }
-      const data = req.body;
-      if (data.maxApplicants) {
-        job.maxApplicants = data.maxApplicants;
-      }
-      if (data.maxPositions) {
-        job.maxPositions = data.maxPositions;
-      }
-      if (data.deadline) {
-        job.deadline = data.deadline;
-      }
-      job
-        .save()
-        .then(() => {
-          res.json({
-            message: "Job details updated successfully",
-          });
-        })
-        .catch((err) => {
-          res.status(400).json(err);
-        });
-    })
-    .catch((err) => {
-      res.status(400).json(err);
+  try {
+    const job = await Job.findOne({ _id: req.params.id, userId: user._id });
+    if (!job) return res.status(404).json({ message: "Job does not exist" });
+    const data = req.body;
+    const editableFields = [
+      "title", "description", "requirements", "maxApplicants", "maxPositions",
+      "deadline", "skillsets", "location", "workMode", "experienceLevel",
+      "category", "jobType", "duration", "status",
+    ];
+    editableFields.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(data, field)) job[field] = data[field];
     });
+    job.hiringStages = DEFAULT_HIRING_STAGES;
+    if (Object.prototype.hasOwnProperty.call(data, "salaryMin")) {
+      job.salaryMin = data.salaryMin === "" ? undefined : Number(data.salaryMin);
+    }
+    if (Object.prototype.hasOwnProperty.call(data, "salaryMax")) {
+      job.salaryMax = data.salaryMax === "" ? undefined : Number(data.salaryMax);
+    }
+    if (job.salaryMin !== undefined && job.salaryMax !== undefined) {
+      job.salary = Math.round((job.salaryMin + job.salaryMax) / 2);
+    }
+    await job.save();
+    return res.json({ message: "Job details updated successfully", job });
+  } catch (err) {
+    return res.status(400).json({ message: err.message });
+  }
 });
 
 // to delete a job
 router.delete("/jobs/:id", jwtAuth, (req, res) => {
   const user = req.user;
-  if (user.type != "recruiter") {
-    res.status(401).json({
-      message: "You don't have permissions to delete the job",
+  if (user.type !== "recruiter") {
+    return res.status(403).json({
+      message: "Recruiter access required",
     });
-    return;
   }
   Job.findOneAndDelete({
     _id: req.params.id,
-    userId: user.id,
+    userId: user._id,
   })
     .then((job) => {
       if (job === null) {
-        res.status(401).json({
-          message: "You don't have permissions to delete the job",
+        res.status(404).json({
+          message: "Job does not exist",
         });
         return;
       }
@@ -492,41 +699,61 @@ router.get("/user/:id", jwtAuth, (req, res) => {
 });
 
 // update user details
-router.put("/user", jwtAuth, (req, res) => {
+router.put("/user", jwtAuth, async (req, res) => {
   const user = req.user;
   const data = req.body;
-  if (user.type == "recruiter") {
-    Recruiter.findOne({ userId: user._id })
-      .then((recruiter) => {
-        if (recruiter == null) {
-          res.status(404).json({
-            message: "User does not exist",
-          });
-          return;
+  if (user.type === "recruiter") {
+    try {
+      if (!data || typeof data !== "object" || Array.isArray(data)) {
+        return res.status(400).json({ message: "A profile object is required" });
+      }
+      const recruiter = await Recruiter.findOne({ userId: user._id });
+      if (!recruiter) {
+        return res.status(404).json({ message: "Recruiter profile not found" });
+      }
+
+      const fields = [
+        "name",
+        "contactNumber",
+        "bio",
+        "companyName",
+        "companyWebsite",
+        "industry",
+        "companySize",
+        "location",
+        "companyLogo",
+        "linkedInUrl",
+      ];
+      for (const field of fields) {
+        if (Object.prototype.hasOwnProperty.call(data, field)) {
+          if (typeof data[field] !== "string") {
+            return res.status(400).json({ message: `${field} must be a string` });
+          }
+          recruiter[field] = data[field].trim();
         }
-        if (data.name) {
-          recruiter.name = data.name;
-        }
-        if (data.contactNumber) {
-          recruiter.contactNumber = data.contactNumber;
-        }
-        if (data.bio) {
-          recruiter.bio = data.bio;
-        }
-        recruiter
-          .save()
-          .then(() => {
-            res.json({
-              message: "User information updated successfully",
-            });
-          })
-          .catch((err) => {
-            res.status(400).json(err);
-          });
-      })
-      .catch((err) => {
-        res.status(400).json(err);
+      }
+
+      if (recruiter.name.trim().length < 2) {
+        return res.status(400).json({ message: "Name must contain at least 2 characters" });
+      }
+      if (recruiter.companyName.trim().length < 2) {
+        return res.status(400).json({ message: "Company name must contain at least 2 characters" });
+      }
+      if (recruiter.bio.length > 2000) {
+        return res.status(400).json({ message: "Company description must be 2000 characters or fewer" });
+      }
+
+      await recruiter.save();
+      return res.json({
+        message: "Recruiter profile updated successfully",
+        profile: recruiter,
       });
+    } catch (err) {
+      if (err.name === "ValidationError" || err.name === "CastError") {
+        return res.status(400).json({ message: err.message });
+      }
+      return res.status(500).json({ message: "Unable to update recruiter profile" });
+    }
   } else {
     JobApplicant.findOne({ userId: user._id })
       .then((jobApplicant) => {
@@ -614,6 +841,10 @@ router.post("/jobs/:id/applications", jwtAuth, (req, res) => {
             });
             return;
           }
+          if (job.status === "closed" || (job.deadline && job.deadline <= new Date())) {
+            res.status(409).json({ message: "This job is no longer accepting applications" });
+            return;
+          }
           Application.countDocuments({
             jobId: jobId,
             status: {
@@ -640,6 +871,7 @@ router.post("/jobs/:id/applications", jwtAuth, (req, res) => {
                             recruiterId: job.userId,
                             jobId: job._id,
                             status: "applied",
+                            hiringStage: "Applied",
                             statusHistory: [{
                               newStatus: "applied",
                               changedBy: user._id,
@@ -732,6 +964,123 @@ router.get("/jobs/:id/applications", jwtAuth, (req, res) => {
     .catch((err) => {
       res.status(400).json(err);
     });
+});
+
+router.put("/applications/:id/stage", jwtAuth, async (req, res) => {
+  if (req.user.type !== "recruiter") {
+    return res.status(403).json({ message: "Recruiter access required" });
+  }
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ message: "Invalid application id" });
+  }
+  const data = req.body;
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return res.status(400).json({ message: "A stage update object is required" });
+  }
+
+  const allowedFields = ["stage", "assessmentDetails", "interviewRound"];
+  if (Object.keys(data).some((field) => !allowedFields.includes(field))) {
+    return res.status(400).json({ message: "Unexpected stage update field" });
+  }
+  if (!Object.prototype.hasOwnProperty.call(data, "stage")) {
+    return res.status(400).json({ message: "Candidate stage is required" });
+  }
+
+  try {
+    const application = await Application.findOne({
+      _id: req.params.id,
+      recruiterId: req.user._id,
+    });
+    if (!application) return res.status(404).json({ message: "Application not found" });
+
+    const job = await Job.findOne({ _id: application.jobId, userId: req.user._id }).select("_id");
+    if (!job) return res.status(403).json({ message: "You do not own this job" });
+    if (["deleted", "cancelled", "withdrawn"].includes(application.status)) {
+      return res.status(409).json({ message: "This application is no longer active" });
+    }
+
+    const currentStage = application.hiringStage || hiringStageForLegacyStatus[application.status] || "Applied";
+    if (!DEFAULT_HIRING_STAGES.includes(data.stage)) {
+      return res.status(400).json({ message: "Choose a stage from the hiring pipeline" });
+    }
+
+    const nextStage = data.stage;
+    if (data.assessmentDetails !== undefined) {
+      const details = data.assessmentDetails;
+      if (!details || typeof details !== "object" || Array.isArray(details)) {
+        return res.status(400).json({ message: "Assessment details must be an object" });
+      }
+      if (!isHttpUrl(details.link)) {
+        return res.status(400).json({ message: "A valid HTTP(S) assessment link is required" });
+      }
+      const deadline = new Date(details.deadline);
+      if (!details.deadline || Number.isNaN(deadline.getTime()) || deadline <= new Date()) {
+        return res.status(400).json({ message: "Assessment deadline must be a future date and time" });
+      }
+      application.assessmentDetails = {
+        link: details.link.trim(),
+        deadline,
+        status: "Pending",
+      };
+    }
+
+    if (data.interviewRound !== undefined) {
+      const round = data.interviewRound;
+      if (!round || typeof round !== "object" || Array.isArray(round)) {
+        return res.status(400).json({ message: "Interview round details must be an object" });
+      }
+      if (application.interviewRounds.length >= 20) {
+        return res.status(409).json({ message: "Maximum interview rounds reached" });
+      }
+      const date = new Date(round.date);
+      if (!round.roundName || typeof round.roundName !== "string" || round.roundName.trim().length > 120) {
+        return res.status(400).json({ message: "Interview round name is required and must be 120 characters or fewer" });
+      }
+      if (!round.date || Number.isNaN(date.getTime()) || date <= new Date()) {
+        return res.status(400).json({ message: "Interview date and time must be in the future" });
+      }
+      const interviewType = round.interviewType || "Online";
+      if (!["Online", "On-site", "Phone"].includes(interviewType)) {
+        return res.status(400).json({ message: "Invalid interview type" });
+      }
+      if (round.meetingLink && !isHttpUrl(round.meetingLink)) {
+        return res.status(400).json({ message: "Meeting link must be a valid HTTP(S) URL" });
+      }
+      if (interviewType === "Online" && !isHttpUrl(round.meetingLink)) {
+        return res.status(400).json({ message: "A valid meeting link is required for online interviews" });
+      }
+
+      application.interviewRounds.push({
+        roundNumber: application.interviewRounds.length + 1,
+        roundName: round.roundName.trim(),
+        date,
+        interviewType,
+        meetingLink: typeof round.meetingLink === "string" ? round.meetingLink.trim() : "",
+        interviewer: typeof round.interviewer === "string" ? round.interviewer.trim() : "",
+        feedback: "",
+        status: "Scheduled",
+      });
+    }
+
+    if (nextStage !== application.hiringStage) {
+      application.hiringStageHistory.push({
+        previousStage: currentStage,
+        newStage: nextStage,
+        changedBy: req.user._id,
+      });
+      application.hiringStage = nextStage;
+    }
+    await application.save();
+    return res.json({
+      message: "Candidate stage updated successfully",
+      application,
+    });
+  } catch (error) {
+    if (error.name === "ValidationError" || error.name === "CastError") {
+      return res.status(400).json({ message: error.message });
+    }
+    return res.status(500).json({ message: "Unable to update candidate stage" });
+  }
 });
 
 // recruiter/applicant gets all his applications [pagination]
@@ -1013,6 +1362,9 @@ router.get("/applicants", jwtAuth, (req, res) => {
       recruiterId: user._id,
     };
     if (req.query.jobId) {
+      if (!mongoose.Types.ObjectId.isValid(req.query.jobId)) {
+        return res.status(400).json({ message: "Invalid job id" });
+      }
       findParams = {
         ...findParams,
         jobId: new mongoose.Types.ObjectId(req.query.jobId),
@@ -1092,12 +1444,6 @@ router.get("/applicants", jwtAuth, (req, res) => {
       { $sort: sortParams },
     ])
       .then((applications) => {
-        if (applications.length === 0) {
-          res.status(404).json({
-            message: "No applicants found",
-          });
-          return;
-        }
         res.json(applications);
       })
       .catch((err) => {
